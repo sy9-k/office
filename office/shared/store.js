@@ -3,17 +3,19 @@
 //       最初に 1 回だけ、保存するフォルダを選んでもらう（showDirectoryPicker）。選んだフォルダは IndexedDB の sk_office に覚えておく
 //       次に開いたときにブラウザが許可を聞き直すことがあるので、そのときは「許可する」を押してもらう（allow()）
 //       ファイル名は「名前.skdoc」「名前.sksheet」「名前.skslide」。中身は JSON：
-//         { format: "sk-hub-office", version: 1, app, tpl, created, data }（data の形は templates.js の説明のとおり）
+//         { format: "sk-hub-office", version: 2, app, tpl, created, data }（data の形は templates.js の説明のとおり。version 1 も読める）
 //       ファイルの ID はフォルダの中のファイル名
 //   ・フォルダに保存できないブラウザ（Safari・Firefox・スマホなど）は、ブラウザの中（localStorage の sk_office_files）に保存する
 //       [{ id, app, name, tpl, created, updated, data }]。ファイルとして書き出す（exportFile）・読み込む（importFile）もできる
 //   ・前にブラウザの中に保存したファイルは、フォルダを選んだあとに migrate() でフォルダに移せる
 //   ・アプリとして入れたあと、エクスプローラー・Finder で .skdoc などをダブルクリックしたときは openHandle() で、そのファイルに直接保存する
+//   ・版の履歴（versions・addVersion）は、このブラウザの IndexedDB に残す（ほかの PC には移らない）
 //   どれも Promise を返す（state()・folderName()・supported だけはすぐ返す）
 (function () {
   "use strict";
   var EXT = { doc: ".skdoc", sheet: ".sksheet", slide: ".skslide" };
   var FORMAT = "sk-hub-office";
+  var FILE_VERSION = 2; // 1 は 0.1。2 は書式・複数シート・ノートなどを足した形（1 も読める）
   var LS_KEY = "sk_office_files";
   var supported = typeof window.showDirectoryPicker === "function" && window.isSecureContext;
   var folder = null, state = supported ? "none" : "unsupported";
@@ -23,7 +25,7 @@
     return null;
   }
   function baseName(fileName) { var a = appOf(fileName); return a ? fileName.slice(0, -EXT[a].length) : fileName; }
-  function payload(f) { return JSON.stringify({ format: FORMAT, version: 1, app: f.app, tpl: f.tpl || "", created: f.created || Date.now(), data: f.data }); }
+  function payload(f) { return JSON.stringify({ format: FORMAT, version: FILE_VERSION, app: f.app, tpl: f.tpl || "", created: f.created || Date.now(), data: f.data }); }
   function parse(text, fallbackApp) {
     var o = JSON.parse(text);
     if (!o || o.format !== FORMAT || !o.data) throw new Error("not-office");
@@ -235,6 +237,35 @@
       });
     },
     isOutside: isHandleId,
+
+    // 版の履歴（前の版を、このブラウザの IndexedDB の kv に「v:ファイルの ID」で 20 個まで残す。ファイルそのものには入れない）
+    //   [{ ts, size, data（JSON の文字列） }]。新しいものが先
+    versions: function (id) {
+      if (!id || isHandleId(id)) return Promise.resolve([]);
+      return idbGet("v:" + id).then(function (a) { return Array.isArray(a) ? a : []; }, function () { return []; });
+    },
+    addVersion: function (id, data) {
+      if (!id || isHandleId(id)) return Promise.resolve(false);
+      var text = JSON.stringify(data);
+      return Store.versions(id).then(function (list) {
+        if (list.length && list[0].data === text) return false;
+        list.unshift({ ts: Date.now(), size: text.length, data: text });
+        // 大きなファイル（画像の多いもの）は、残す数を減らす
+        var total = 0;
+        list = list.filter(function (v, i) { total += v.size; return i < 20 && (i < 3 || total < 30000000); });
+        return idbSet("v:" + id, list).then(function () { return true; });
+      }).catch(function () { return false; });
+    },
+    moveVersions: function (from, to) {
+      if (!from || !to || from === to) return Promise.resolve();
+      return Store.versions(from).then(function (list) {
+        if (!list.length) return;
+        return idbSet("v:" + to, list).then(function () { return idb("readwrite", function (s) { return s.delete("v:" + from); }); });
+      }).catch(function () {});
+    },
+    dropVersions: function (id) {
+      return idb("readwrite", function (s) { return s.delete("v:" + id); }).catch(function () {});
+    },
 
     // ほかの場所のファイル（.skdoc など）を読み込んで、保存先に入れる
     importFile: function (file) {

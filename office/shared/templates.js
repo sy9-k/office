@@ -2,9 +2,9 @@
 //   window.OFFICE_TEMPLATES[app] = [{ id, name, cat, desc, data }]。いちばん上は白紙（cat: "blank"）
 //   cat … "blank"（白紙）・"school"（学校）・"work"（仕事）・"life"（くらし）。テンプレートの一覧のしぼりこみに使う
 //   data … ファイルの中身の最初の形（/office/shared/office.js が、選んだときにそのまま写してファイルにする）
-//     Doc:   { html }                                  … 文書の本文（h1・h2・p・ul・ol・table）
-//     Sheet: { cells: { "A1": "…" }, fmt: { C: "yen" }, head: 1, total: 12 } … セル（= で始まると数式）・列の書式・見出しの行・合計の行
-//     Slide: { slides: [{ layout: "title|bullets|section", title, sub, items }] }
+//     Doc:   { html, page?: { size, orient, margin } }  … 文書の本文（h1・h2・p・ul・ol・table・img）と用紙
+//     Sheet: { cells, fmt, style, head, total, sheets?, cur? } … セル（= で始まると数式）・列の書式・セルの見た目・複数シート
+//     Slide: { slides: [{ layout: "title|bullets|section", title, sub, items, notes, image }] }
 (function () {
   "use strict";
 
