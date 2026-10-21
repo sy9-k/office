@@ -899,6 +899,7 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
    ================================================================ */
 @media (max-width: 760px) {
   .start { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  :root.is-wco .start { grid-template-rows: var(--wco-h) auto minmax(0, 1fr); }
   .rail { flex-direction: row; overflow-x: auto; overflow-y: hidden; gap: 0; padding: max(6px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); }
   .rail__brand { flex-direction: row; margin: 0 8px 0 0; gap: 8px; }
   .rail__logo { width: 36px; height: 36px; border-radius: 10px; }
