@@ -1,0 +1,57 @@
+// SK Hub Office のサービスワーカー（PWA。一度開いたら、オフラインでも開ける）
+//   ・ページ（Doc・Sheet・Slide・入り口）: ネットにつながっていれば新しいものを使い、つながらないときは前に取っておいたものを出す
+//   ・CSS・JS・アイコン・フォント: 取っておいたものをすぐ使い、後ろで新しいものに入れかえる
+//   ・置く場所は Office のいちばん上（office.sk-hub.jp/sw.js・手元では /office/sw.js）。scope も同じ
+//   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
+const VERSION = "sk-office-v1";
+const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
+const SHELL = ["", "doc/", "sheet/", "slide/", "manifest.json",
+  "shared/office.css", "shared/office.js", "shared/store.js", "shared/templates.js",
+  "icons/icon.svg", "icons/icon-192.png"].map((p) => BASE + p)
+  .concat(["/toolbox/shared/m3.css", "/toolbox/shared/m3.js", "/assets/i18n.js", "/assets/fonts.js", "/assets/coming-soon.js", "/assets/maintenance.js"]);
+const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
+
+self.addEventListener("install", (e) => {
+  e.waitUntil(caches.open(VERSION).then((cache) => Promise.allSettled(SHELL.map((u) => cache.add(u)))).then(() => self.skipWaiting()));
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil(caches.keys()
+    .then((keys) => Promise.all(keys.filter((k) => k.startsWith("sk-office-") && k !== VERSION).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim()));
+});
+
+self.addEventListener("fetch", (e) => {
+  const req = e.request;
+  if (req.method !== "GET") return;
+  const url = new URL(req.url);
+  const same = url.origin === self.location.origin;
+
+  // ページ: ネットを先に（3 秒待ってもだめなら、取っておいたもの）
+  if (req.mode === "navigate" && same && url.pathname.startsWith(BASE)) {
+    e.respondWith((async () => {
+      const cache = await caches.open(VERSION);
+      try {
+        const res = await Promise.race([fetch(req), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 3000))]);
+        if (res.ok) cache.put(url.pathname, res.clone());
+        return res;
+      } catch (err) {
+        return (await cache.match(url.pathname)) || (await cache.match(BASE)) || Response.error();
+      }
+    })());
+    return;
+  }
+
+  // 部品・フォント: 取っておいたものをすぐ使い、後ろで新しくする
+  if (same || FONT_HOSTS.includes(url.hostname)) {
+    e.respondWith((async () => {
+      const cache = await caches.open(VERSION);
+      const hit = await cache.match(req, { ignoreSearch: same });
+      const fresh = fetch(req).then((res) => {
+        if (res.ok || res.type === "opaque") cache.put(req, res.clone());
+        return res;
+      }).catch(() => hit || Response.error());
+      return hit || fresh;
+    })());
+  }
+});

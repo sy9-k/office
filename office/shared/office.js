@@ -6,6 +6,8 @@
 //   ・ファイルは PC の選んだフォルダに 1 つずつ保存する（フォルダに保存できないブラウザは、ブラウザの中）。中身は /office/shared/store.js
 //   ・アカウント（SK Hub Systems アカウントのログインの状態・製品情報）とオプション（ユーザー名・テーマ・動き・保存先・自動保存）は、スタート画面の左のメニューから開く。
 //     オプションは localStorage の sk_office_settings に保存する
+//   ・PWA: /office/manifest.json（アプリ全体を 1 つの「SK Hub Office」として入れる。Doc・Sheet・Slide はショートカット）と /office/sw.js（オフライン）。
+//     入れたあとは、.skdoc・.sksheet・.skslide をダブルクリックすると、そのアプリで開く（file_handlers・launchQueue）
 //   ・まだできない操作のボタンは、押すと「まだ使えません」と出す（data-todo）
 //   ・ダイアログは /toolbox/shared/m3.js の M3.prompt・M3.choose・M3.confirm
 (function () {
@@ -83,6 +85,24 @@
     if (d.getFullYear() === now.getFullYear()) return t("{m}月{d}日", { m: d.getMonth() + 1, d: d.getDate() });
     return t("{y}年{m}月{d}日", { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() });
   }
+  // ---------- アプリとして入れる（PWA。/office/manifest.json・/office/sw.js） ----------
+  var installEvt = null;
+  var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  window.addEventListener("beforeinstallprompt", function (e) {
+    e.preventDefault();
+    installEvt = e;
+    if ($("home") && !$("home").hidden) renderStart();
+  });
+  window.addEventListener("appinstalled", function () {
+    installEvt = null;
+    notify(t("SK Hub Office をインストールしました"));
+    if ($("home") && !$("home").hidden) renderStart();
+  });
+  function installText() {
+    if (standalone) return t("インストールして使っています。");
+    if (installEvt) return t("Windows・Mac・Chromebook に、アプリとして入れます。オフラインでも開けて、.skdoc などのファイルをダブルクリックで開けるようになります。");
+    return t("ブラウザのメニューから入れられます（Chrome・Edge はアドレスバーの右のインストールのボタン、Safari は共有ボタンの「Dock に追加」や「ホーム画面に追加」）。");
+  }
   function failed(e) {
     if (window.console) console.error(e);
     notify(Store.supported ? t("保存できませんでした。フォルダを使う許可を確かめてください") : t("保存できませんでした。端末の空きを確かめてください"));
@@ -136,6 +156,7 @@
       '<span class="rail__space"></span>' +
       (a ? '<a class="rail__item" href="' + BASE + '"><span class="rail__pill">' + icon("apps") + "</span><span>" + esc(t("アプリ")) + "</span></a>"
          : '<a class="rail__item" href="' + SITE + '/products/office/"><span class="rail__pill">' + icon("info") + "</span><span>" + esc(t("紹介")) + "</span></a>") +
+      (installEvt && !standalone ? railBtn("data-install", "install_desktop", t("インストール")) : "") +
       railItem("account", "account_circle", t("アカウント")) +
       railItem("options", "settings", t("オプション")) +
       "</nav>";
@@ -231,6 +252,9 @@
         optRow("folder", t("保存先"), place, s === "unsupported" ? "" : '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-pick>' + esc(s === "none" ? t("フォルダを選ぶ") : t("変更")) + "</button>") +
         optRow("save", t("自動保存"), t("変えたらすぐに保存します。オフにすると、保存のボタンか Ctrl+S で保存します"), '<input type="checkbox" class="tbs-switch" id="opt-autosave"' + (settings.autosave ? " checked" : "") + ' aria-label="' + esc(t("自動保存")) + '">') +
         '<div id="legacy"></div>' +
+      "</section>" +
+      '<section class="opts"><h2 class="opts__title">' + esc(t("アプリ")) + "</h2>" +
+        optRow("install_desktop", t("アプリとしてインストール"), installText(), installEvt && !standalone ? '<button type="button" class="m3-btn m3-state" data-install>' + esc(t("インストール")) + "</button>" : "") +
       "</section>" +
       '<p class="start__note">' + esc(t("オプションは、このブラウザに保存されます。")) + "</p>";
   }
@@ -357,7 +381,10 @@
         if (old !== f.id && isPinned(old)) { setPinned(old, false); setPinned(f.id, true); }
         if (done) done();
       });
-    }).catch(failed);
+    }).catch(function (e) {
+      if (e && e.message === "outside") notify(t("フォルダの外のファイルは、名前を変えられません。「コピーを保存」で、新しい名前で保存できます"));
+      else failed(e);
+    });
   }
   function importFile() {
     ensureFolder().then(function (ok) {
@@ -997,6 +1024,10 @@
       return;
     }
     if (e.target.closest("[data-close-file]")) return closeFile();
+    if (e.target.closest("[data-install]")) {
+      if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; renderStart(); }); }
+      return;
+    }
     if ((el = e.target.closest("[data-theme-set]"))) { settings.theme = el.getAttribute("data-theme-set"); saveSettings(); applySettings(); renderStart(); return; }
     if (e.target.closest("[data-avatar-btn]")) { flush(); view = "account"; renderStart(); show("home"); return; }
     if ((el = e.target.closest("[data-view]"))) { view = el.getAttribute("data-view"); query = ""; renderStart(); var m = $("start-main"); if (m) m.scrollTop = 0; return; }
@@ -1044,7 +1075,7 @@
     var id = m && APPS[APP] ? decodeURIComponent(m[1]) : null;
     if (!id || !$("editor")) { showStart(); return Promise.resolve(); }
     // フォルダの許可がまだのときは、スタート画面で「許可する」を押してもらう（押したら、このファイルを開く）
-    if (Store.supported && Store.state() !== "ready") { showStart(); return Promise.resolve(); }
+    if (Store.supported && Store.state() !== "ready" && !Store.isOutside(id)) { showStart(); return Promise.resolve(); }
     return Store.get(id).then(function (f) {
       if (f && f.app === APP) { show("editor"); openEditor(f); }
       else { history.replaceState(null, "", location.pathname); notify(t("ファイルが見つかりませんでした")); showStart(); }
@@ -1066,6 +1097,17 @@
   buildEditor();
   fillAvatars();
   Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); });
+  // オフラインでも開けるように（/office/sw.js）
+  if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(function () { /* なくても使える */ });
+  }
+  // アプリとして入れたあと、エクスプローラー・Finder で .skdoc などをダブルクリックしたとき（manifest の file_handlers）
+  if ("launchQueue" in window && APPS[APP]) {
+    window.launchQueue.setConsumer(function (params) {
+      if (!params.files || !params.files.length) return;
+      Store.init().then(function () { return Store.openHandle(params.files[0]); }).then(function (id) { openFile(id); }).catch(failed);
+    });
+  }
   // 起動画面は、少し見せてから消す
   var splash = $("splash");
   if (splash) setTimeout(function () {
