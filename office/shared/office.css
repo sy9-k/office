@@ -431,9 +431,9 @@ h1, h2, h3, p { margin: 0; }
 .editor.is-back { animation: bs-back .3s var(--fl-in); }
 @keyframes bs-back { from { opacity: 0; transform: translateX(24px); } }
 .editor > * { min-width: 0; }
-/* タイトルバー（アプリの色） */
+/* タイトルバー（アプリの色）。flex: none … 中身の長いファイルで、紙のところに押されて縮まないように（is-wco では min-height が 0 になるため） */
 .titlebar {
-  display: flex; align-items: center; gap: 4px; min-height: 52px;
+  flex: none; display: flex; align-items: center; gap: 4px; min-height: 52px;
   padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
   background: var(--md-primary-container); color: var(--md-on-primary-container);
 }
