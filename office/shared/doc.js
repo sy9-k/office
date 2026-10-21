@@ -123,7 +123,8 @@
           '<aside class="doc-cmts" id="doc-cmts"' + (showCmts ? "" : " hidden") + ' aria-label="' + esc(t("コメント")) + '"></aside>' +
         "</div>";
       page = el("page");
-      page.innerHTML = data.html || "<p><br></p>";
+      // ほかの人から受け取ったファイルも開くので、ファイルの中の HTML はいつも安全なものだけにしてから入れる
+      page.innerHTML = sanitize(data.html || "", true) || "<p><br></p>";
       fixCharts();
       layout();
       wire();
@@ -1364,7 +1365,7 @@
     // ---------- 小さなプレビュー ----------
     function thumb(d) {
       var html = String(d.html || "").replace(/<img[^>]*>/gi, '<span class="th-img"></span>').replace(/<svg[\s\S]*?<\/svg>/gi, '<span class="th-img"></span>');
-      return '<div class="th th--doc" aria-hidden="true"><div class="th-doc">' + html + "</div></div>";
+      return '<div class="th th--doc" aria-hidden="true"><div class="th-doc">' + sanitize(html) + "</div></div>";
     }
 
     return {

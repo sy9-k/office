@@ -43,11 +43,21 @@
         if (!Array.isArray(s.objs)) s.objs = [];
         // 0.1 の画像（右下の写真）は、ものにする
         if (s.image) { s.objs.push({ id: uid(), type: "image", src: s.image, x: 62, y: 52, w: 30, h: 38 }); delete s.image; }
+        // ほかの人から受け取ったファイルも開くので、文字の HTML・画像の場所・色は安全なものだけにする
+        if (s.bg && !safeColor(s.bg)) delete s.bg;
+        s.objs.forEach(function (o) {
+          if (o.html) o.html = cleanText(o.html);
+          if (o.src && !/^(data:image\/|https:\/\/)/i.test(o.src)) o.src = "";
+          ["fill", "line", "color"].forEach(function (k) { if (o[k] && o[k] !== "none" && !safeColor(o[k])) delete o[k]; });
+          ["x", "y", "w", "h", "rot", "fs"].forEach(function (k) { if (o[k] !== undefined && !isFinite(+o[k])) delete o[k]; else if (o[k] !== undefined) o[k] = +o[k]; });
+        });
       });
       if (!THEMES[d.theme]) d.theme = "mikan";
       if (d.ratio !== "4:3") d.ratio = "16:9";
       return d;
     }
+    // 色として使ってよい文字（#rrggbb・rgb(…)・色の名前・var(--sl-…)）
+    function safeColor(c) { return /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20}|var\(--sl-[a-z-]+\))$/i.test(String(c)); }
     var seq = 0;
     function uid() { return "o" + Date.now().toString(36) + (seq++).toString(36); }
 

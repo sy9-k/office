@@ -4,7 +4,7 @@
 //   ・フォント（Google Fonts）: 取っておいたものをすぐ使い、後ろで新しいものに入れかえる
 //   ・置く場所は Office のいちばん上（office.sk-hub.jp/sw.js・手元では /office/sw.js）。scope も同じ
 //   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
-const VERSION = "sk-office-v6";
+const VERSION = "sk-office-v7";
 const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
 const SHELL = ["", "doc/", "sheet/", "slide/", "manifest.json",
   "shared/office.css", "shared/office.js", "shared/store.js", "shared/templates.js",

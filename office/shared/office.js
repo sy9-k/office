@@ -608,28 +608,65 @@
       notify(t("書き出せませんでした"));
     });
   }
+  // アカウント（Microsoft Office の「アカウント」と同じ並び。左: ユーザー情報・プライバシー・テーマ・接続済みサービス、右: 製品情報と大きなボタン）
   function viewAccount() {
-    var hint = accountHint(), name = userName(), a = APPS[APP] || { icon: "apps" };
+    var hint = accountHint(), name = userName(), s = Store.state();
     // アプリとして入れたウィンドウからは、ブラウザでログインのページを開く（戻ってきたら、ログインの状態を読みなおす）
     var target = standalone ? ' target="_blank" rel="noopener"' : "";
+    var blank = ' target="_blank" rel="noopener"';
     if (bridge && Date.now() - accountAt > 5000) setTimeout(function () { syncAccount(true); }, 0);
+    var themes = [["auto", t("端末に合わせる")], ["light", t("ライト")], ["dark", t("ダーク")]];
+    var services = [s === "unsupported" ? ["public", t("このブラウザ"), t("ブラウザの中に保存したファイル")]
+      : ["computer", t("この PC"), s === "none" ? t("フォルダを選んでいません") : t("フォルダ「{name}」", { name: Store.folderName() })]];
+    if (hint) services.push(["cloud", t("SK Hub Systems アカウント"), hint.email || hint.name || ""]);
+    var canInstall = installEvt && !standalone;
+    // 右の大きなボタン: [アイコン, ボタンの文字, 見出し, 説明, ボタンの属性（なければ押せない）]
+    var tiles = [
+      ["system_update_alt", t("今すぐ更新"), t("SK Hub Office の更新"), t("ネットにつながっていれば、開いたときに新しい版が自動で使われます。") + (current ? t("今すぐ更新するときは、ファイルを閉じてから押してください。") : ""), current ? "" : "data-update"],
+      ["install_desktop", t("インストール"), t("アプリとしてインストール"), installText(), canInstall ? "data-install" : ""],
+      ["help", t("サポート"), t("サポート"), t("使い方・よくある質問・お問い合わせ。"), 'href="https://support.sk-hub.jp/"' + blank],
+      ["info", t("バージョン情報"), t("SK Hub Office のバージョン情報"), [t("SK Hub Office、ポリシー、サポートに関する詳しい情報。"), t("バージョン {v}（開発中）", { v: VERSION }), "SK Material（Material Design 3）"], 'href="' + SITE + '/products/office/"' + blank]
+    ];
     return '<h1 class="start__h1">' + esc(t("アカウント")) + "</h1>" +
-      '<section class="acct-card"><span class="acct-avatar" data-avatar aria-hidden="true"></span>' +
-        '<div class="acct-card__text"><strong>' + esc(name || t("名前が設定されていません")) + "</strong><small>" + esc(hint && hint.email ? hint.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div>" +
-        (hint ? '<span class="acct-badge">' + icon("verified_user", true) + esc(t("ログイン中")) + "</span>" : '<button type="button" class="text-btn m3-state" data-view="options">' + esc(t("名前を変更")) + "</button>") + "</section>" +
-      '<section class="start__sec"><h2 class="start__h2">SK Hub Systems ' + esc(t("アカウント")) + "</h2>" +
-        (hint
-          ? '<p class="sec-text">' + esc(t("{name} さんとしてログインしています。名前やアイコンの変更・ログアウトは、アカウントのページで行います。", { name: hint.name || hint.email })) + "</p>" +
-            // ログイン中に ?next= 付きで開くと、すぐ戻ってきてしまうので、管理のページはそのまま開く（戻ってきたら、ログインの状態を読みなおす）
-            '<div class="btn-row"><a class="m3-btn m3-btn--tonal m3-state" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("manage_accounts") + esc(t("アカウントの管理・ログアウト")) + "</a></div>"
-          : '<p class="sec-text">' + esc(t("ログインすると、Office でもアカウントの名前とアイコンが出ます。ログインのページは sk-hub.jp で開き、終わったらこの画面に戻ります。")) + "</p>" +
-            '<div class="btn-row"><a class="m3-btn m3-state" href="' + esc(loginUrl()) + '"' + target + ">" + icon("login") + esc(t("ログイン")) + "</a>" +
-            '<a class="text-btn m3-state" href="' + SITE + '/account/" target="_blank" rel="noopener">' + esc(t("アカウントを作る")) + "</a></div>") +
-        '<div class="note-card">' + icon("folder") + "<p>" + esc(t("ファイルは、ログインしてもしなくても、この PC に保存されます。インターネット上への保存（ほかの端末で開く・共有する）は準備中です。")) + "</p></div></section>" +
-      '<section class="start__sec"><h2 class="start__h2">' + esc(t("製品情報")) + '</h2>' +
-        '<div class="about"><span class="about__logo">' + icon(a.icon, true) + '</span><div><strong>SK Hub Office</strong><small>' + esc(t("バージョン {v}（開発中）", { v: VERSION })) + "</small></div></div>" +
-        '<p class="sec-text">' + esc(t("文書の Doc・表計算の Sheet・スライドの Slide をまとめた、SK のオフィスアプリです。見た目は SK Material（Google の Material Design 3 がもと）です。")) + "</p>" +
-        '<div class="links"><a href="' + SITE + '/products/office/" target="_blank" rel="noopener">' + esc(t("SK Hub Office について")) + '</a><a href="' + SITE + '/policies/" target="_blank" rel="noopener">' + esc(t("利用規約とプライバシーポリシー")) + '</a><a href="https://support.sk-hub.jp/" target="_blank" rel="noopener">' + esc(t("サポート")) + "</a></div></section>";
+      '<div class="acct">' +
+        '<div class="acct__col">' +
+          '<section class="acct__sec"><h2 class="acct__h">' + esc(t("ユーザー情報")) + "</h2>" +
+            '<div class="acct-user"><span class="acct-avatar" data-avatar aria-hidden="true"></span><div class="acct-user__text"><strong>' + esc(name || t("名前が設定されていません")) + "</strong>" +
+              "<small>" + esc(hint && hint.email ? hint.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div></div>" +
+            '<div class="acct-links">' + (hint
+              // ログイン中に ?next= 付きで開くと、すぐ戻ってきてしまうので、管理のページはそのまま開く（戻ってきたら、ログインの状態を読みなおす）
+              ? '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("ログアウト")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントの管理")) + "</a>"
+              : '<a href="' + esc(loginUrl()) + '"' + target + ">" + esc(t("ログイン")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントを作る")) + "</a>") +
+              '<button type="button" data-view="options">' + esc(t("名前を変更")) + "</button></div></section>" +
+          '<section class="acct__sec"><h2 class="acct__h">' + esc(t("アカウントのプライバシー")) + "</h2>" +
+            '<a class="acct-btn m3-state" href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a></section>" +
+          '<section class="acct__sec"><h2 class="acct__h"><label for="acct-theme">' + esc(t("Office テーマ")) + "</label></h2>" +
+            '<span class="acct-select"><select id="acct-theme">' + themes.map(function (x) {
+              return '<option value="' + x[0] + '"' + (settings.theme === x[0] ? " selected" : "") + ">" + esc(x[1]) + "</option>";
+            }).join("") + "</select>" + icon("expand_more") + "</span></section>" +
+          '<section class="acct__sec"><h2 class="acct__h">' + esc(t("接続済みサービス")) + "</h2>" +
+            '<ul class="acct-services">' + services.map(function (x) {
+              return "<li>" + icon(x[0]) + '<span><strong>' + esc(x[1]) + "</strong><small>" + esc(x[2]) + "</small></span></li>";
+            }).join("") + "</ul>" +
+            '<button type="button" class="acct-btn m3-state" data-todo="' + esc(t("インターネット上への保存")) + '">' + esc(t("サービスの追加")) + icon("expand_more") + "</button>" +
+            '<p class="start__note">' + esc(t("ファイルは、ログインしてもしなくても、この PC に保存されます。インターネット上への保存（ほかの端末で開く・共有する）は準備中です。")) + "</p></section>" +
+        "</div>" +
+        '<div class="acct__col">' +
+          '<section class="acct__sec"><h2 class="acct__h">' + esc(t("製品情報")) + "</h2>" +
+            '<p class="acct-brand">SK Hub Office</p>' +
+            '<p class="acct-product">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p>" +
+            '<p class="acct-small">' + esc(t("この製品には以下が含まれます。")) + "</p>" +
+            '<div class="acct-apps">' + ["doc", "sheet", "slide"].map(function (k) {
+              return '<a class="acct-apps__ico" data-app="' + k + '" href="' + APPS[k].path + '" title="' + APPS[k].name + '" aria-label="' + APPS[k].name + '">' + icon(APPS[k].icon, true) + "</a>";
+            }).join("") + "</div></section>" +
+          '<div class="acct-tiles">' + tiles.map(function (x) {
+            var tag = /^href/.test(x[4]) ? "a" : "button", off = !x[4];
+            var desc = [].concat(x[3]).map(function (p) { return "<p>" + esc(p) + "</p>"; }).join("");
+            return '<div class="acct-tile' + (off ? " is-off" : "") + '"><' + tag + (tag === "button" ? ' type="button"' : "") + ' class="acct-tile__btn m3-state" ' + (off ? "disabled" : x[4]) + ">" + icon(x[0]) + "<span>" + esc(x[1]) + "</span></" + tag + ">" +
+              '<div class="acct-tile__text"><strong>' + esc(x[2]) + "</strong>" + desc + "</div></div>";
+          }).join("") + "</div>" +
+        "</div>" +
+      "</div>";
   }
   function optRow(ic, title, sub, control) {
     return '<div class="opt">' + icon(ic) + '<div class="opt__text"><strong>' + esc(title) + "</strong>" + (sub ? "<small>" + esc(sub) + "</small>" : "") + "</div>" + control + "</div>";
@@ -675,7 +712,8 @@
       '<div class="files-head">' +
         (withTabs ? '<div class="tabs" role="tablist">' +
           '<button type="button" class="tab m3-state" role="tab" data-ftab="recent" aria-selected="' + (fileTab === "recent") + '"><span>' + esc(t("最近使ったアイテム")) + "</span></button>" +
-          '<button type="button" class="tab m3-state" role="tab" data-ftab="pinned" aria-selected="' + (fileTab === "pinned") + '"><span>' + esc(t("ピン留め")) + "</span></button></div>"
+          '<button type="button" class="tab m3-state" role="tab" data-ftab="pinned" aria-selected="' + (fileTab === "pinned") + '"><span>' + esc(t("ピン留め")) + "</span></button>" +
+          '<span class="tabs__ind" aria-hidden="true"></span></div>'
           : '<h2 class="start__h2">' + esc(Store.state() === "unsupported" ? t("このブラウザのファイル") : t("フォルダのファイル")) + "</h2>") +
         '<label class="search">' + icon("search") + '<input type="search" id="file-search" placeholder="' + esc(t("検索")) + '" value="' + esc(query) + '" autocomplete="off" aria-label="' + esc(t("ファイルを検索")) + '"></label>' +
       "</div>" +
@@ -851,7 +889,7 @@
     var sig = tabs.map(function (tb) { return tb.tab; }).join("|");
     if (row.getAttribute("data-sig") !== sig) {
       row.setAttribute("data-sig", sig);
-      row.innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + esc(t("ファイル")) + "</button>" +
+      row.innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + icon("folder", true) + esc(t("ファイル")) + "</button>" +
         tabs.map(function (tb, i) { return '<button type="button" class="rtab m3-state' + (tb.ctx ? " rtab--ctx" : "") + '" role="tab" aria-selected="false" data-rtab="' + i + '"><span>' + esc(tb.tab) + "</span></button>"; }).join("") +
         '<span class="rtabs__space"></span><button type="button" class="icon-btn m3-state rtabs__fold" data-fold></button>' +
         '<span class="rtabs__ind" id="rtabs-ind" aria-hidden="true"></span>';
@@ -875,21 +913,25 @@
     syncRibbon();
     placeIndicator();
   }
-  // 選んだタブの下線を、いまの場所から滑らせて動かす（Office と同じ。下線は 1 本だけで、CSS の transition で動く）。
+  // タブの下線（ind）を、tab の下へ滑らせる。下線は 1 本だけで、CSS の transition（left・right）で動く。
+  // 両端は同時に動く（伸び縮みせず、幅だけ次のタブに合わせて変わる）。
   // animate: false のときは、すぐその場所に置く（開いたとき・画面の大きさが変わったとき）
-  function placeIndicator(animate) {
-    var ind = $("rtabs-ind"), tab = document.querySelector('.rtab[aria-selected="true"] > span'), box = $("rtabs");
-    if (!ind || !tab || !box) return;
+  function moveLine(ind, tab, box, animate) {
     var r = tab.getBoundingClientRect(), b = box.getBoundingClientRect();
     if (!r.width) return;
-    if (animate === false || !ind.style.width) {
-      ind.style.transition = "none";
-      requestAnimationFrame(function () { requestAnimationFrame(function () { ind.style.transition = ""; }); });
-    }
-    ind.style.transform = "translateX(" + (r.left - b.left + box.scrollLeft) + "px)";
-    ind.style.width = r.width + "px";
+    var left = r.left - b.left + box.scrollLeft;
+    if (animate === false || isNaN(parseFloat(ind.style.left))) ind.style.transition = "none";
+    ind.style.left = left + "px";
+    ind.style.right = (box.clientWidth - left - r.width) + "px";
+    if (ind.style.transition === "none") { void ind.offsetWidth; ind.style.transition = ""; }
+  }
+  function placeIndicator(animate) {
+    var ind = $("rtabs-ind"), tab = document.querySelector('.rtab[aria-selected="true"] > span'), box = $("rtabs");
+    if (ind && tab && box) moveLine(ind, tab, box, animate);
   }
   window.addEventListener("resize", function () { placeIndicator(false); });
+  // フォント（M PLUS 1・アイコン）が読みこまれると、タブの幅が変わるので置き直す
+  if (document.fonts) document.fonts.addEventListener("loadingdone", function () { placeIndicator(false); });
   // 選んでいるところに合わせて、リボンのボタンのオン・オフと、フォント名などの文字を変える。
   // 図形を選んだときの「図形の書式」のような、出たり消えたりするタブ（when）も、ここで出し入れする
   var syncTimer = null;
@@ -1212,13 +1254,22 @@
       if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; renderStart(); }); }
       return;
     }
+    // 今すぐ更新（サービスワーカーに新しい版を聞いてから、開き直す。ファイルを開いているときは押せない）
+    if (e.target.closest("[data-update]")) {
+      var sw = "serviceWorker" in navigator ? navigator.serviceWorker.getRegistration(BASE).then(function (r) { return r && r.update(); }) : Promise.resolve();
+      sw.catch(function () { /* つながらなくても開き直す */ }).then(function () { location.reload(); });
+      return;
+    }
     if ((el = e.target.closest("[data-theme-set]"))) { settings.theme = el.getAttribute("data-theme-set"); saveSettings(); applySettings(); renderStart(); return; }
     if (e.target.closest("[data-avatar-btn]")) { flush(); view = "account"; renderStart(); show("home"); return; }
     if ((el = e.target.closest("[data-view]"))) { view = el.getAttribute("data-view"); query = ""; renderStart(); var m = $("start-main"); if (m) m.scrollTop = 0; return; }
     if ((el = e.target.closest("[data-ftab]"))) {
       // スタート画面全体は作り直さず、タブの印とファイルの一覧だけ変える
       fileTab = el.getAttribute("data-ftab");
-      el.parentElement.querySelectorAll("[data-ftab]").forEach(function (b) { b.setAttribute("aria-selected", String(b === el)); });
+      // 下線は、前のタブの下に置いてから、押したタブへ滑らせる（それまでは CSS の ::after の下線）
+      var row = el.parentElement, line = row.querySelector(".tabs__ind"), from = row.querySelector('[aria-selected="true"] > span');
+      if (line && from && from.parentElement !== el) { moveLine(line, from, row, false); row.classList.add("has-ind"); moveLine(line, el.firstChild, row); }
+      row.querySelectorAll("[data-ftab]").forEach(function (b) { b.setAttribute("aria-selected", String(b === el)); });
       animateFiles = true;
       renderFileTable();
       return;
@@ -1237,6 +1288,7 @@
   document.addEventListener("change", function (e) {
     var id = e.target.id;
     if (id === "opt-user") { settings.user = e.target.value.trim().slice(0, 40); saveSettings(); fillAvatars(); notify(settings.user ? t("名前を「{name}」にしました", { name: settings.user }) : t("名前を消しました")); }
+    if (id === "acct-theme") { settings.theme = e.target.value; saveSettings(); applySettings(); }
     if (id === "opt-motion") { settings.motion = e.target.checked ? "reduce" : "auto"; saveSettings(); applySettings(); }
     if (id === "opt-autosave") { settings.autosave = e.target.checked; saveSettings(); if (settings.autosave && dirty) saveNow(); notify(settings.autosave ? t("自動保存をオンにしました") : t("自動保存をオフにしました")); }
   });
@@ -1320,5 +1372,5 @@
   if (splash) setTimeout(function () {
     splash.classList.add("is-done");
     setTimeout(function () { splash.hidden = true; }, reduced ? 0 : 420);
-  }, reduced ? 0 : 900);
+  }, reduced ? 0 : 1000);
 })();

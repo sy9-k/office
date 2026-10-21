@@ -122,42 +122,54 @@ h1, h2, h3, p { margin: 0; }
 /* ================================================================
    起動画面
    ================================================================ */
+/* 地の色の上に、アイコンと同じ 3 枚のタイル（後ろから Slide・Sheet・Doc）が、それぞれの向きから飛んできて組み上がる。
+   開いたアプリのタイルは、組み上がったあと少し前に出る。名前は下から切り出すように出る。消えるときは手前に寄りながらぼやける */
 .splash {
   position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden;
-  background: var(--md-primary-container); color: var(--md-on-primary-container);
-  transition: opacity .25s linear;
+  background: var(--md-surface); color: var(--md-on-surface);
+  transition: opacity .35s var(--ease) .05s;
 }
+/* うしろの、アプリの色のぼんやりした光 */
+.splash::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 760px; height: 760px; margin: -440px 0 0 -380px; border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--md-primary-container) 30%, transparent), transparent);
+  pointer-events: none; animation: sp-glow 1.2s var(--ease) backwards;
+}
+@keyframes sp-glow { from { opacity: 0; transform: scale(.5); } }
 .splash.is-done { opacity: 0; pointer-events: none; }
-.splash__in { display: grid; justify-items: center; gap: 12px; position: relative; }
-/* 3 枚の紙が重なって出てくる（後ろから Slide・Sheet・Doc の色） */
-.splash__papers { position: relative; width: 112px; height: 96px; margin-bottom: 16px; }
-.splash__papers { animation: sp-logo .5s var(--fl-in) backwards; }
-.splash__papers i { position: absolute; width: 64px; height: 80px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); animation: sp-paper .6s var(--fl-in) backwards; }
-.splash__papers i::before { content: ""; position: absolute; left: 12px; right: 12px; top: 14px; height: 6px; border-radius: 3px; background: var(--c); box-shadow: 0 14px 0 -1px color-mix(in srgb, var(--c) 40%, transparent), 0 26px 0 -1px color-mix(in srgb, var(--c) 40%, transparent); }
-.splash__papers i:nth-child(1) { --c: #ea580c; left: 44px; top: 0; rotate: 10deg; animation-delay: .05s; }
-.splash__papers i:nth-child(2) { --c: #16a34a; left: 24px; top: 8px; rotate: -4deg; animation-delay: .15s; }
-.splash__papers i:nth-child(3) { --c: #2563eb; left: 6px; top: 16px; rotate: -12deg; animation-delay: .25s; }
-:root[data-app="doc"] .splash__papers i:nth-child(3), :root[data-app="sheet"] .splash__papers i:nth-child(2), :root[data-app="slide"] .splash__papers i:nth-child(1) { z-index: 1; scale: 1.08; }
-@keyframes sp-logo { from { opacity: 0; transform: scale(.8); } }
-@keyframes sp-paper { from { transform: translateY(14px); } }
-.splash__name { font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -.02em; animation: sp-up .5s var(--fl-in) .12s backwards; }
-.splash__sub { font-size: 14px; font-weight: 500; letter-spacing: .04em; opacity: .85; animation: sp-up .5s var(--fl-in) .2s backwards; }
-@keyframes sp-up { from { opacity: 0; transform: translateY(10px); } }
-/* 読みこみ中の 5 つの点（Office の起動画面と同じ。速く入って、まん中でゆっくり、速く出ていく） */
-.splash__dots { position: relative; width: 220px; height: 6px; margin-top: 36px; overflow: hidden; }
-.splash__dots i { position: absolute; left: 0; top: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0; animation: sp-dot 2.4s infinite; }
-.splash__dots i:nth-child(2) { animation-delay: .14s; }
-.splash__dots i:nth-child(3) { animation-delay: .28s; }
-.splash__dots i:nth-child(4) { animation-delay: .42s; }
-.splash__dots i:nth-child(5) { animation-delay: .56s; }
-@keyframes sp-dot {
-  0% { transform: translateX(0); opacity: 0; animation-timing-function: var(--fl-in); }
-  8% { opacity: 1; }
-  40% { transform: translateX(100px); animation-timing-function: linear; }
-  60% { transform: translateX(120px); animation-timing-function: var(--fl-out); }
-  92% { opacity: 1; }
-  100% { transform: translateX(220px); opacity: 0; }
+.splash__in { position: relative; display: grid; justify-items: center; transition: transform .4s var(--ease), filter .4s var(--ease); }
+.splash.is-done .splash__in { transform: scale(1.08); filter: blur(8px); }
+.splash__mark { position: relative; width: 120px; height: 120px; margin-bottom: 24px; }
+.splash__mark i {
+  position: absolute; border-radius: 10px; background: var(--c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 10px 22px -8px color-mix(in srgb, var(--c) 80%, transparent);
+  animation: sp-tile .6s cubic-bezier(.3, 1.35, .5, 1) var(--d) backwards;
 }
+.splash__mark i:nth-child(1) { --c: #ea580c; --d: 0s; --from: translate(30px, -26px) rotate(16deg); left: 50px; top: 20px; width: 52px; height: 38px; }
+.splash__mark i:nth-child(2) { --c: #16a34a; --d: .08s; --from: translate(34px, 18px) rotate(-12deg); left: 35px; top: 39px; width: 50px; height: 42px; }
+.splash__mark i:nth-child(3) { --c: #2563eb; --d: .16s; --from: translate(-30px, 24px) rotate(-16deg); left: 17px; top: 57px; width: 46px; height: 46px; }
+@keyframes sp-tile { from { opacity: 0; transform: var(--from) scale(.5); } }
+/* タイルの中の印（Slide は見出し・Sheet は表の線・Doc は文字の行） */
+.splash__mark i::before, .splash__mark i::after { content: ""; position: absolute; border-radius: 2px; background: #fff; }
+.splash__mark i:nth-child(1)::before { left: 9px; top: 9px; width: 20px; height: 5px; opacity: .9; }
+.splash__mark i:nth-child(2)::before { inset: 15px 0 auto; height: 3px; border-radius: 0; opacity: .75; box-shadow: 0 14px 0 #fff; }
+.splash__mark i:nth-child(2)::after { left: 16px; top: 0; bottom: 0; width: 3px; border-radius: 0; opacity: .75; }
+.splash__mark i:nth-child(3)::before { left: 10px; right: 10px; top: 13px; height: 4px; box-shadow: 0 9px 0 #fff; }
+.splash__mark i:nth-child(3)::after { left: 10px; top: 31px; width: 16px; height: 4px; }
+:root[data-app="doc"] .splash__mark i:nth-child(3), :root[data-app="sheet"] .splash__mark i:nth-child(2), :root[data-app="slide"] .splash__mark i:nth-child(1) {
+  z-index: 1; animation: sp-tile .6s cubic-bezier(.3, 1.35, .5, 1) var(--d) backwards, sp-pick .4s var(--ease-sk) .55s both;
+}
+@keyframes sp-pick { to { scale: 1.1; } }
+.splash__word { overflow: hidden; padding: 0 6px 4px; }
+.splash__name { display: block; font-size: 48px; font-weight: 700; line-height: 1.15; letter-spacing: -.02em; animation: sp-rise .65s var(--ease) .26s backwards; }
+@keyframes sp-rise { from { transform: translateY(110%); } }
+.splash__sub { padding-left: .24em; font-size: 12px; font-weight: 500; line-height: 16px; letter-spacing: .24em; text-transform: uppercase; color: var(--md-on-surface-variant); animation: sp-track .8s var(--ease) .4s backwards; }
+@keyframes sp-track { from { opacity: 0; letter-spacing: .6em; } }
+/* 読みこみ中の細い線（光の帯が左から右へ流れる。入り口は 3 つのアプリの色） */
+.splash__bar { position: relative; width: 136px; height: 3px; margin-top: 36px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--md-on-surface) 10%, transparent); animation: fade-in .4s linear .5s backwards; }
+.splash__bar::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%; border-radius: inherit; background: var(--md-primary); animation: sp-bar 1.1s cubic-bezier(.65, 0, .35, 1) infinite; }
+:root[data-app="hub"] .splash__bar::before { background: linear-gradient(90deg, var(--doc-c), var(--sheet-c), var(--slide-c)); }
+@keyframes sp-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 /* 画面が入ってくるとき（下から少し上がる。Office のスタート画面と同じ） */
 @keyframes view-in { from { opacity: 0; transform: translateY(20px); } }
 @keyframes fade-in { from { opacity: 0; } }
@@ -257,12 +269,19 @@ h1, h2, h3, p { margin: 0; }
 
 /* ファイルの一覧（タブ・検索・表） */
 .files-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.tabs { display: flex; }
-.tab { height: 48px; padding: 0 16px; border: 0; background: none; cursor: pointer; color: var(--md-on-surface-variant); font-size: 14px; font-weight: 500; }
+.tabs { position: relative; display: flex; }
+.tab { height: 48px; padding: 0 16px; border: 0; background: none; cursor: pointer; color: var(--md-on-surface-variant); font-size: 14px; font-weight: 500; transition: color .2s linear; }
 .tab > span { position: relative; display: inline-flex; align-items: center; height: 100%; }
 .tab[aria-selected="true"] { color: var(--md-primary); }
-.tab[aria-selected="true"] > span::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); animation: tab-in .32s var(--ease-sk); }
-@keyframes tab-in { from { transform: scaleX(.4); } }
+.tab[aria-selected="true"] > span::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); }
+/* タブを切りかえたら、下線は 1 本で滑って動く（office.js の moveLine）。それまでは上の ::after */
+.tabs__ind { opacity: 0; }
+.tabs.has-ind .tabs__ind { opacity: 1; }
+.tabs.has-ind .tab > span::after { display: none; }
+/* タブ（ここ・リボン）と「ファイル」は、押したときの波紋を出さない。タブは、ボタン全体の四角い色も出さず、文字のまわりの角の丸い形だけ色を付ける */
+.tab::before, .rtab:not(.rtab--file)::before { inset: 6px 2px; border-radius: 8px; }
+.tab .ripple, .rtab .ripple { display: none; }
+.tabs__ind, .rtabs__ind { position: absolute; bottom: 0; left: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); pointer-events: none; transition: left .32s var(--ease), right .32s var(--ease); }
 .search { display: flex; align-items: center; gap: 8px; width: min(320px, 100%); height: 40px; padding: 0 16px; border-radius: 20px; background: var(--md-surface-container-high); color: var(--md-on-surface-variant); }
 .search .msr { font-size: 20px; }
 .search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; color: var(--md-on-surface); font: 14px var(--md-font); }
@@ -311,28 +330,67 @@ h1, h2, h3, p { margin: 0; }
 .note-card > .msr { color: var(--md-primary); }
 .note-card p { flex: 1 1 240px; min-width: 0; }
 
-/* アカウント */
-.acct-card { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 20px; border-radius: 16px; background: var(--md-surface-container-low); box-shadow: inset 0 0 0 1px var(--md-outline-variant); }
-.acct-avatar { width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 26px; font-weight: 700; }
-.acct-avatar .msr { font-size: 36px; }
-.acct-card__text { flex: 1 1 200px; min-width: 0; display: grid; }
-.acct-card__text strong { font-size: 20px; font-weight: 500; line-height: 28px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.acct-card__text small { font-size: 14px; color: var(--md-on-surface-variant); }
+/* アカウント（Microsoft Office と同じ 2 列。左: ユーザー情報など、右: 製品情報と大きなボタン） */
+.acct { display: grid; grid-template-columns: minmax(0, 380px) minmax(0, 1fr); gap: 40px 80px; align-items: start; }
+.acct__col { display: grid; gap: 28px; align-content: start; }
+.acct__sec { display: grid; gap: 10px; justify-items: start; }
+.acct__h { font-size: 15px; font-weight: 700; line-height: 22px; }
+.acct-user { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; }
+.acct-avatar { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 17px; font-weight: 700; }
+.acct-avatar .msr { font-size: 24px; }
+.acct-user__text { min-width: 0; display: grid; }
+.acct-user__text strong { font-size: 14px; font-weight: 500; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-user__text small { font-size: 13px; line-height: 18px; color: var(--md-on-surface-variant); overflow-wrap: anywhere; }
 [data-avatar] { overflow: hidden; }
 [data-avatar] img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-.acct-badge { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 12px 0 8px; border-radius: 14px; background: var(--md-secondary-container); color: var(--md-on-secondary-container); font-size: 12.5px; font-weight: 500; }
-.acct-badge .msr { font-size: 18px; }
-.start__sec > .note-card { margin-top: 4px; }
+.acct-links { display: grid; justify-items: start; gap: 2px; }
+.acct-links a, .acct-links button { padding: 0; border: 0; background: none; color: var(--md-primary); font: 500 13px/22px var(--md-font); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.acct-links a:hover, .acct-links button:hover { text-decoration-thickness: 2px; }
+/* 小さな四角いボタン（Office の「設定の管理」「サービスの追加」） */
+.acct-btn { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 12px; border: 1px solid var(--md-outline); border-radius: 8px; background: none; color: var(--md-on-surface); font: 500 13px var(--md-font); text-decoration: none; cursor: pointer; }
+.acct-btn .msr { font-size: 18px; margin-right: -4px; }
+.acct-select { position: relative; display: block; width: 100%; }
+.acct-select select { appearance: none; width: 100%; height: 36px; padding: 0 36px 0 12px; border: 1px solid var(--md-outline); border-radius: 8px; background: var(--md-surface-container-low); color: var(--md-on-surface); font: 14px var(--md-font); cursor: pointer; }
+.acct-select select:focus-visible { outline: 2px solid var(--md-primary); outline-offset: 1px; }
+.acct-select .msr { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 20px; color: var(--md-on-surface-variant); pointer-events: none; }
+.acct-services { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.acct-services li { display: flex; align-items: center; gap: 12px; }
+.acct-services .msr { color: var(--md-primary); }
+.acct-services strong { display: block; font-size: 14px; font-weight: 500; line-height: 20px; }
+.acct-services small { font-size: 13px; color: var(--md-on-surface-variant); overflow-wrap: anywhere; }
+.acct__sec > .start__note { max-width: 36em; }
+.acct-brand { margin: 4px 0 8px; font-size: clamp(36px, 5vw, 52px); font-weight: 500; line-height: 1.1; letter-spacing: -.01em; color: var(--md-primary); }
+.acct-product { font-size: 20px; line-height: 28px; }
+.acct-small { font-size: 13px; color: var(--md-on-surface-variant); }
+.acct-apps { display: flex; gap: 8px; }
+.acct-apps__ico { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: #fff; transition: transform .2s var(--ease); }
+.acct-apps__ico:hover { transform: translateY(-2px); }
+.acct-apps__ico .msr { font-size: 18px; }
+.acct-apps__ico[data-app="doc"] { background: var(--doc-c); }
+.acct-apps__ico[data-app="sheet"] { background: var(--sheet-c); }
+.acct-apps__ico[data-app="slide"] { background: var(--slide-c); }
+/* 大きなボタンと説明（Office の「更新オプション」「バージョン情報」） */
+.acct-tiles { display: grid; gap: 16px; }
+.acct-tile { display: flex; align-items: flex-start; gap: 16px; }
+.acct-tile__btn {
+  flex: none; width: 112px; min-height: 88px; padding: 10px 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  border: 1px solid var(--md-outline-variant); border-radius: 12px; background: var(--md-surface-container-low); color: var(--md-on-surface);
+  font: 500 12px/16px var(--md-font); text-align: center; text-decoration: none; cursor: pointer;
+}
+.acct-tile__btn .msr { font-size: 30px; color: var(--md-primary); }
+.acct-tile__btn:hover { border-color: var(--md-primary); }
+.acct-tile.is-off .acct-tile__btn { cursor: default; color: var(--md-on-surface-variant); opacity: .55; }
+.acct-tile.is-off .acct-tile__btn .msr { color: inherit; }
+.acct-tile.is-off .acct-tile__btn:hover { border-color: var(--md-outline-variant); }
+.acct-tile__text { min-width: 0; display: grid; gap: 2px; padding-top: 6px; max-width: 34em; }
+.acct-tile__text strong { font-size: 15px; font-weight: 700; line-height: 22px; }
+.acct-tile__text p { font-size: 13px; line-height: 20px; color: var(--md-on-surface-variant); }
+@media (max-width: 900px) {
+  .acct { grid-template-columns: minmax(0, 1fr); }
+}
 .sec-text { max-width: 44em; color: var(--md-on-surface-variant); line-height: 22px; }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .btn-row .m3-btn { text-decoration: none; }
-.about { display: flex; align-items: center; gap: 16px; }
-.about__logo { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; flex: none; background: var(--md-primary-container); color: var(--md-on-primary-container); }
-.about strong { display: block; font-size: 16px; font-weight: 500; }
-.about small { font-size: 13px; color: var(--md-on-surface-variant); }
-.links { display: flex; flex-wrap: wrap; gap: 4px 20px; }
-.links a { color: var(--md-primary); font-weight: 500; text-decoration: none; }
-.links a:hover { text-decoration: underline; }
 
 /* オプション（M3 のリストと同じ並び） */
 .opts { display: grid; border-radius: 16px; overflow: hidden; background: var(--md-surface-container-low); }
@@ -397,22 +455,31 @@ h1, h2, h3, p { margin: 0; }
 /* リボン（タブ＋グループ）。グループの下に名前を出す */
 .ribbon { background: var(--md-surface-container); }
 .rtabs { position: relative; display: flex; align-items: center; overflow-x: auto; padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); scrollbar-width: none; }
-/* 選んだタブの下線。タブを切りかえると、前のタブから滑って動く（office.js の placeIndicator） */
-.rtabs__ind { position: absolute; bottom: 0; left: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); pointer-events: none; transition: transform .3s var(--fl-in), width .3s var(--fl-in); }
-/* タブを切りかえたときの中身（右のタブなら右から、左のタブなら左から入る） */
-.rbody.is-from-right .rgroup { animation: rb-r .28s var(--fl-in) backwards; }
-.rbody.is-from-left .rgroup { animation: rb-l .28s var(--fl-in) backwards; }
+/* 選んだタブの下線（.rtabs__ind。形と動きは .tabs__ind と同じ）。タブを切りかえると、前のタブから滑って動く（office.js の placeIndicator） */
+/* タブを切りかえたときの中身（右のタブなら右から、左のタブなら左から、少しだけずれて入る） */
+.rbody.is-from-right .rgroup { animation: rb-r .26s var(--ease) backwards; }
+.rbody.is-from-left .rgroup { animation: rb-l .26s var(--ease) backwards; }
 .rbody.is-open .rgroup { animation: fade-in .2s linear backwards; }
 .rbody .rgroup:nth-child(2) { animation-delay: .02s; }
 .rbody .rgroup:nth-child(3) { animation-delay: .04s; }
 .rbody .rgroup:nth-child(n+4) { animation-delay: .06s; }
-@keyframes rb-r { from { opacity: 0; transform: translateX(24px); } }
-@keyframes rb-l { from { opacity: 0; transform: translateX(-24px); } }
+@keyframes rb-r { from { opacity: 0; transform: translateX(12px); } }
+@keyframes rb-l { from { opacity: 0; transform: translateX(-12px); } }
 .rtabs::-webkit-scrollbar { display: none; }
-.rtab { flex: none; height: 40px; padding: 0 14px; border: 0; border-radius: 0; background: none; cursor: pointer; color: var(--md-on-surface-variant); font-size: 14px; font-weight: 500; white-space: nowrap; }
+/* 選んだタブを太字にしない（文字の幅が変わって、ほかのタブが横にずれるので）。色と下線だけで示す */
+.rtab { flex: none; height: 40px; padding: 0 14px; border: 0; border-radius: 0; background: none; cursor: pointer; color: var(--md-on-surface-variant); font-size: 14px; font-weight: 500; white-space: nowrap; transition: color .2s linear; }
 .rtab > span { position: relative; display: inline-flex; align-items: center; height: 100%; }
-.rtab[aria-selected="true"] { color: var(--md-primary); font-weight: 700; }
-.rtab--file { margin-right: 4px; color: var(--md-primary); font-weight: 700; border-radius: 20px; height: 32px; }
+.rtab[aria-selected="true"] { color: var(--md-primary); }
+/* 「ファイル」はタブではなく、スタート画面を開くボタン。タブと見分けが付くように、アプリの色で塗った丸いボタンにする */
+.rtab--file {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-right: 10px; padding: 0 16px 0 12px; border-radius: 16px;
+  background: var(--md-primary-container); color: var(--md-on-primary-container); font-weight: 700;
+  transition: transform .2s var(--ease), box-shadow .2s linear;
+}
+.rtab--file .msr { width: 18px; overflow: hidden; font-size: 18px; transition: transform .25s var(--ease-sk); }
+.rtab--file:hover { box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--md-primary-container) 70%, transparent); }
+.rtab--file:hover .msr { transform: translateX(-2px) rotate(-8deg); }
+.rtab--file:active { transform: scale(.95); transition-duration: .08s; }
 .rtabs__space { flex: 1; }
 .rtabs__fold { width: 36px; height: 36px; }
 /* リボンの中身は、角の丸いカードに乗せる（SK Material） */
