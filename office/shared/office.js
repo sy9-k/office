@@ -176,7 +176,8 @@
 
   // ---------- アプリとして入れる（PWA。/office/manifest.json・/office/sw.js） ----------
   var installEvt = null;
-  var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  // 上の帯を使っているときは display-mode が window-controls-overlay になるので、それも「入れて使っている」
+  var standalone = window.matchMedia("(display-mode: standalone), (display-mode: window-controls-overlay)").matches || navigator.standalone === true;
   window.addEventListener("beforeinstallprompt", function (e) {
     e.preventDefault();
     installEvt = e;
@@ -625,7 +626,7 @@
       ["system_update_alt", t("今すぐ更新"), t("SK Hub Office の更新"), t("ネットにつながっていれば、開いたときに新しい版が自動で使われます。") + (current ? t("今すぐ更新するときは、ファイルを閉じてから押してください。") : ""), current ? "" : "data-update"],
       ["install_desktop", t("インストール"), t("アプリとしてインストール"), installText(), canInstall ? "data-install" : ""],
       ["help", t("サポート"), t("サポート"), t("使い方・よくある質問・お問い合わせ。"), 'href="https://support.sk-hub.jp/"' + blank],
-      ["info", t("バージョン情報"), t("SK Hub Office のバージョン情報"), [t("SK Hub Office、ポリシー、サポートに関する詳しい情報。"), t("バージョン {v}（開発中）", { v: VERSION }), "SK Material（Material Design 3）"], 'href="' + SITE + '/products/office/"' + blank]
+      ["info", t("バージョン情報"), t("SK Hub Office のバージョン情報"), [t("SK Hub Office、ポリシー、サポートに関する詳しい情報。"), t("バージョン {v}（開発中）", { v: VERSION }), "SK Material（Material Design 3）"], "data-about"]
     ];
     return '<h1 class="start__h1">' + esc(t("アカウント")) + "</h1>" +
       '<div class="acct">' +
@@ -777,8 +778,17 @@
     });
   }
 
+  // アプリとして入れたときは、Microsoft Office のように 1 つのファイルを 1 つのウィンドウで開く
+  //   ファイルを開いているウィンドウ（「ファイル」から開いたスタート画面も）からは、新しいウィンドウで開く。何も開いていないスタート画面は、そのウィンドウがファイルになる
+  //   エクスプローラーで選んだフォルダの外のファイル（@番号/…）は、このウィンドウでしか読めないので、このウィンドウで開く
   function openFile(id, app) {
-    if (app && app !== APP && APPS[app]) { location.href = APPS[app].path + "#f=" + encodeURIComponent(id); return; }
+    var url = APPS[app && APPS[app] ? app : APP].path + "#f=" + encodeURIComponent(id);
+    if (standalone && current && !Store.isOutside(id)) {
+      window.open(url, "_blank", "noopener");
+      if (!$("home").hidden) backToEditor();
+      return;
+    }
+    if (app && app !== APP && APPS[app]) { location.href = url; return; }
     history.pushState(null, "", "#f=" + encodeURIComponent(id));
     route();
   }
@@ -1132,6 +1142,31 @@
     body.innerHTML = list.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("");
     M3.dialog({ title: t("キーボードショートカット"), icon: "keyboard", body: body, actions: [{ label: t("閉じる"), value: null, primary: true }] });
   }
+  // バージョン情報（Microsoft Office の「Word のバージョン情報」のように、ウィンドウの上に出す）
+  function showAbout() {
+    var a = APPS[APP], blank = ' target="_blank" rel="noopener"', s = Store.state();
+    var rows = [
+      [t("バージョン"), t("{v}（開発中）", { v: VERSION })],
+      [t("含まれるアプリ"), "Doc・Sheet・Slide"],
+      [t("使い方"), standalone ? t("インストールして使っています") : t("ブラウザで使っています")],
+      [t("保存先"), s === "unsupported" ? t("このブラウザの中") : s === "none" ? t("フォルダを選んでいません") : t("この PC のフォルダ「{name}」", { name: Store.folderName() })],
+      [t("見た目"), "SK Material（Material Design 3）"],
+      [t("文字・アイコン"), "M PLUS 1・Material Symbols Rounded"]
+    ];
+    var body = document.createElement("div");
+    body.className = "about";
+    body.innerHTML =
+      '<div class="about__head"><span class="about__logo">' + icon(a ? a.icon : "apps", true) + "</span><div>" +
+        '<p class="about__name">' + (a ? "SK Hub Office " + a.name : "SK Hub Office") + "</p>" +
+        '<p class="about__sub">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p></div></div>" +
+      '<dl class="about__list">' + rows.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") + "</dl>" +
+      '<p class="about__note">' + esc(t("文書・表・スライドの機能は、すべて SK が自作しています。ファイルは、ログインしてもしなくても、この PC に保存されます。")) + "</p>" +
+      '<div class="about__links">' +
+        '<a href="' + SITE + '/products/office/"' + blank + ">" + esc(t("製品のページ")) + "</a>" +
+        '<a href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a>" +
+        '<a href="https://support.sk-hub.jp/"' + blank + ">" + esc(t("サポート")) + "</a></div>";
+    M3.dialog({ title: t("バージョン情報"), body: body, autofocus: false, actions: [{ label: t("閉じる"), value: null, primary: true }] });
+  }
 
   function runCmd(cmd, el) {
     if (!current && cmd !== "keys" && cmd !== "find") return;
@@ -1250,6 +1285,7 @@
     }
     if (e.target.closest("[data-rename]")) return renameCurrent();
     if (e.target.closest("[data-close-file]")) return closeFile();
+    if (e.target.closest("[data-about]")) return showAbout();
     if (e.target.closest("[data-install]")) {
       if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; renderStart(); }); }
       return;
