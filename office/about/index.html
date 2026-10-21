@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja" data-app="hub">
+<head>
+<meta charset="UTF-8">
+<!-- バージョン情報のウィンドウ（Microsoft Office の「Word のバージョン情報」のように、タブのない小さなウィンドウ）
+     アカウントの「バージョン情報」から ../shared/office.js が window.open で開く。中身（文字・色）は開いたウィンドウの SKOfficeAbout() からもらう -->
+<script>if(/^(www\.)?sk-hub\.jp$/.test(location.hostname))location.replace("https://office.sk-hub.jp"+location.pathname.replace(/^\/office(?=\/)/,"")+location.search+location.hash);</script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#2563eb">
+<meta name="robots" content="noindex">
+<title>SK Hub Office</title>
+<script src="/assets/fonts.js" data-fonts="https://fonts.googleapis.com/css2?family=M+PLUS+1:wght@400;500;700&display=swap" data-icons="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block"></script>
+<link rel="stylesheet" href="/toolbox/shared/m3.css">
+<link rel="stylesheet" href="../shared/office.css">
+<link rel="manifest" href="../manifest.json">
+<link rel="icon" type="image/svg+xml" href="../icons/icon.svg">
+<style>
+  html { height: 100%; }
+  body { height: auto; min-height: 100%; }
+  body { display: flex; flex-direction: column; gap: 20px; padding: 24px 24px 20px; background: var(--md-surface-container-low); }
+  .about { max-width: none; }
+  .about-win__actions { display: flex; justify-content: flex-end; margin-top: auto; }
+</style>
+</head>
+<body>
+  <div class="about" id="about">
+    <div class="about__head"><span class="about__logo"><span class="msr msr--fill" aria-hidden="true">apps</span></span><div><p class="about__name">SK Hub Office</p></div></div>
+  </div>
+  <div class="about-win__actions"><button type="button" class="m3-btn m3-state" id="close">閉じる</button></div>
+  <script>
+  (function () {
+    "use strict";
+    var root = document.documentElement, src = null;
+    try { src = window.opener && window.opener.SKOfficeAbout ? window.opener.SKOfficeAbout() : null; } catch (e) { /* 別の場所から開いたとき */ }
+    if (src) {
+      // 開いたウィンドウと同じアプリの色・テーマ・言語に
+      ["data-app", "data-theme", "data-motion", "lang"].forEach(function (k) {
+        var v = window.opener.document.documentElement.getAttribute(k);
+        if (v) root.setAttribute(k, v); else root.removeAttribute(k);
+      });
+      document.getElementById("about").innerHTML = src.html;
+      document.getElementById("close").textContent = src.close;
+      document.title = src.title;
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta && src.color) meta.setAttribute("content", src.color);
+    }
+    function close() { window.close(); }
+    document.getElementById("close").addEventListener("click", close);
+    document.addEventListener("keydown", function (e) { if (e.key === "Escape") close(); });
+    document.getElementById("close").focus();
+  })();
+  </script>
+</body>
+</html>

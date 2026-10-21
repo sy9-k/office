@@ -7,7 +7,7 @@
   "scope": "./",
   "display": "standalone",
   "display_override": ["window-controls-overlay"],
-  "launch_handler": { "client_mode": ["navigate-existing", "auto"] },
+  "launch_handler": { "client_mode": ["navigate-new", "auto"] },
   "lang": "ja",
   "dir": "ltr",
   "background_color": "#faf8ff",
