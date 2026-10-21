@@ -6,7 +6,7 @@
 //   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
 const VERSION = "sk-office-v7";
 const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
-const SHELL = ["", "doc/", "sheet/", "slide/", "manifest.json",
+const SHELL = ["", "doc/", "sheet/", "slide/", "about/", "manifest.json",
   "shared/office.css", "shared/office.js", "shared/store.js", "shared/templates.js",
   "shared/doc.js", "shared/sheet.js", "shared/slide.js", "shared/formula.js", "shared/chart.js", "shared/zip.js",
   "icons/icon.svg", "icons/icon-192.png"].map((p) => BASE + p)

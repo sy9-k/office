@@ -1142,8 +1142,23 @@
     body.innerHTML = list.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("");
     M3.dialog({ title: t("キーボードショートカット"), icon: "keyboard", body: body, actions: [{ label: t("閉じる"), value: null, primary: true }] });
   }
-  // バージョン情報（Microsoft Office の「Word のバージョン情報」のように、ウィンドウの上に出す）
+  // バージョン情報（Microsoft Office の「Word のバージョン情報」のように、タブのない小さなウィンドウ ../about/ で開く）
+  //   中身は aboutHtml()。小さなウィンドウは、開いたときに SKOfficeAbout() で中身・色をもらう。開けない（ポップアップを止めている）ときは、ダイアログで出す
+  var ABOUT_W = 460, ABOUT_H = 500;
   function showAbout() {
+    var x = Math.round(window.screenX + (window.outerWidth - ABOUT_W) / 2), y = Math.round(window.screenY + Math.max(40, (window.outerHeight - ABOUT_H) / 3));
+    var w = window.open(BASE + "about/", "sk-office-about", "popup=yes,width=" + ABOUT_W + ",height=" + ABOUT_H + ",left=" + x + ",top=" + y);
+    if (w) { w.focus(); return; }
+    var body = document.createElement("div");
+    body.className = "about";
+    body.innerHTML = aboutHtml();
+    M3.dialog({ title: t("バージョン情報"), body: body, autofocus: false, actions: [{ label: t("閉じる"), value: null, primary: true }] });
+  }
+  window.SKOfficeAbout = function () {
+    return { html: aboutHtml(), title: t("バージョン情報") + " — SK Hub Office", close: t("閉じる"),
+      color: getComputedStyle(root).getPropertyValue("--md-primary-container").trim() };
+  };
+  function aboutHtml() {
     var a = APPS[APP], blank = ' target="_blank" rel="noopener"', s = Store.state();
     var rows = [
       [t("バージョン"), t("{v}（開発中）", { v: VERSION })],
@@ -1153,10 +1168,7 @@
       [t("見た目"), "SK Material（Material Design 3）"],
       [t("文字・アイコン"), "M PLUS 1・Material Symbols Rounded"]
     ];
-    var body = document.createElement("div");
-    body.className = "about";
-    body.innerHTML =
-      '<div class="about__head"><span class="about__logo">' + icon(a ? a.icon : "apps", true) + "</span><div>" +
+    return '<div class="about__head"><span class="about__logo">' + icon(a ? a.icon : "apps", true) + "</span><div>" +
         '<p class="about__name">' + (a ? "SK Hub Office " + a.name : "SK Hub Office") + "</p>" +
         '<p class="about__sub">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p></div></div>" +
       '<dl class="about__list">' + rows.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") + "</dl>" +
@@ -1165,7 +1177,6 @@
         '<a href="' + SITE + '/products/office/"' + blank + ">" + esc(t("製品のページ")) + "</a>" +
         '<a href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a>" +
         '<a href="https://support.sk-hub.jp/"' + blank + ">" + esc(t("サポート")) + "</a></div>";
-    M3.dialog({ title: t("バージョン情報"), body: body, autofocus: false, actions: [{ label: t("閉じる"), value: null, primary: true }] });
   }
 
   function runCmd(cmd, el) {
