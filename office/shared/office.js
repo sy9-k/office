@@ -3,13 +3,19 @@
 //   見た目は SK Material（部品は /toolbox/shared/m3.css、色は office.css）。
 //   <html data-app="doc|sheet|slide|hub"> で、どのアプリかを決める。画面の中身はここで組み立てる（各ページは起動画面と入れ物だけ）
 //   ・起動画面（#splash）→ スタート画面（ホーム・新規・開く）→ エディタ（#f=<ファイルの ID>）。エディタの「ファイル」でスタート画面に戻る
+//     ファイルを開いているときのスタート画面（Office の「バックステージ」）には、情報（版の履歴）・エクスポート・印刷も出る
+//   ・アプリの中身（リボン・編集・書き出し）は、アプリごとのファイル（doc.js・sheet.js・slide.js）。このファイルより先に読み込み、
+//     window.OfficeApps[アプリ] = function (O) { return { ribbon, render, command, … } } で登録する。O はこのファイルが渡す道具（下の「アプリに渡す道具」）
 //   ・ファイルは PC の選んだフォルダに 1 つずつ保存する（フォルダに保存できないブラウザは、ブラウザの中）。中身は /office/shared/store.js
+//   ・元に戻す・やり直しは、ファイルの中身（data）をまるごと覚えておく（どのアプリも同じ。O.changed() を呼ぶと覚える）
 //   ・アカウント（SK Hub Systems アカウントのログインの状態・製品情報）とオプション（ユーザー名・テーマ・動き・保存先・自動保存）は、スタート画面の左のメニューから開く。
+//     ログインは sk-hub.jp の /account/ で行う。office.sk-hub.jp では、ログイン中かのヒントを /assets/hub/bridge.html から受け取る（下の「SK Hub Systems アカウント」）。
+//     ファイルをインターネット上に保存するしくみは、まだない
 //     オプションは localStorage の sk_office_settings に保存する
 //   ・PWA: /office/manifest.json（アプリ全体を 1 つの「SK Hub Office」として入れる。Doc・Sheet・Slide はショートカット）と /office/sw.js（オフライン）。
 //     入れたあとは、.skdoc・.sksheet・.skslide をダブルクリックすると、そのアプリで開く（file_handlers・launchQueue）
 //   ・まだできない操作のボタンは、押すと「まだ使えません」と出す（data-todo）
-//   ・ダイアログは /toolbox/shared/m3.js の M3.prompt・M3.choose・M3.confirm
+//   ・ダイアログは /toolbox/shared/m3.js の M3.prompt・M3.choose・M3.confirm・M3.dialog。ボタンの下に出るメニューは O.menu・色は O.palette
 (function () {
   "use strict";
   var root = document.documentElement;
@@ -37,7 +43,7 @@
 
   // ---------- 保存（/office/shared/store.js）と設定 ----------
   var Store = window.OfficeStore;
-  var VERSION = "0.1";
+  var VERSION = "0.3";
   // SK Hub Office の設定（このブラウザの localStorage の sk_office_settings）
   //   { theme: "auto|light|dark", motion: "auto|reduce", autosave: true|false, user: "名前", pinned: [ファイルの ID] }
   var SET_KEY = "sk_office_settings";
@@ -66,10 +72,76 @@
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { syncThemeColor(); });
   function accountHint() { try { return JSON.parse(localStorage.getItem("skhub_account") || "null"); } catch (e) { return null; } }
   function userName() { var h = accountHint(); return (settings.user || (h && h.name) || "").trim(); }
-  // アカウントのアイコン（名前の 1 文字目。名前がなければ人のアイコン）
+  // アカウントのアイコン（ログイン中はアカウントの写真か頭文字と色。そうでなければ名前の 1 文字目。名前がなければ人のアイコン）
   function fillAvatars() {
-    var n = userName();
-    document.querySelectorAll("[data-avatar]").forEach(function (el) { el.innerHTML = n ? esc(Array.from(n)[0].toUpperCase()) : icon("person"); });
+    var n = userName(), h = accountHint();
+    document.querySelectorAll("[data-avatar]").forEach(function (el) {
+      el.innerHTML = h && h.photo ? '<img src="' + esc(h.photo) + '" alt="" referrerpolicy="no-referrer">' : n ? esc(Array.from(n)[0].toUpperCase()) : icon("person");
+      el.style.background = h && !h.photo && /^#[0-9a-f]{6}$/i.test(h.color || "") ? h.color : "";
+      el.style.color = el.style.background ? "#fff" : "";
+    });
+  }
+
+  // ---------- SK Hub Systems アカウント（ログイン中かどうか） ----------
+  //   ログイン・ログアウトは sk-hub.jp の /account/ で行い、終わったら Office に戻ってくる。Office が使うのは、ログイン中かのヒント
+  //   （skhub_account: 名前・メールアドレス・写真。assets/hub/account.js が保存する）だけで、ファイルはいままでどおり PC に保存する（オンライン保存はまだ）。
+  //   office.sk-hub.jp からは sk-hub.jp の保存場所が見えないので、/assets/hub/bridge.html（見えない iframe）から受け取って、このページの localStorage に写す。
+  //   手元（localhost）や sk-hub.jp では同じ保存場所なので、そのまま読む
+  var ON_SUB = /^office\.sk-hub\.jp$/.test(location.hostname);
+  var bridge = (function () {
+    if (!ON_SUB) return null;
+    var ORIGIN = "https://sk-hub.jp", waiting = {}, seq = 0, frame = null, loaded = null;
+    function open() {
+      if (loaded) return loaded;
+      loaded = new Promise(function (resolve) {
+        window.addEventListener("message", function (e) {
+          var m = e.data;
+          if (e.origin !== ORIGIN || !m || m.sk !== "bridge") return;
+          if (m.ready) { resolve(); return; }
+          if (waiting[m.id]) { waiting[m.id](m.value); delete waiting[m.id]; }
+        });
+        frame = document.createElement("iframe");
+        frame.src = ORIGIN + "/assets/hub/bridge.html";
+        frame.hidden = true; frame.title = ""; frame.tabIndex = -1;
+        frame.setAttribute("aria-hidden", "true");
+        document.body.appendChild(frame);
+      });
+      return loaded;
+    }
+    return {
+      ask: function (op, timeout) {
+        return Promise.race([
+          open().then(function () { return new Promise(function (resolve) { var id = ++seq; waiting[id] = resolve; frame.contentWindow.postMessage({ sk: "bridge", id: id, op: op }, ORIGIN); }); }),
+          new Promise(function (resolve) { setTimeout(function () { resolve(undefined); }, timeout); })
+        ]);
+      }
+    };
+  })();
+  var accountAt = 0;
+  // sk-hub.jp のログインの状態を写す（変わったら、アイコンとアカウントの画面を作り直す）。verify: ログインが切れていないかも確かめる
+  function syncAccount(verify) {
+    if (!bridge) return Promise.resolve(false);
+    accountAt = Date.now();
+    return bridge.ask("prefs", 5000).then(function (p) {
+      if (!p) return false;
+      var before = localStorage.getItem("skhub_account") || null, after = p.skhub_account || null;
+      if (after && verify) return bridge.ask("token", 15000).then(function (tk) { if (tk === null) after = null; return apply(before, after); });
+      return apply(before, after);
+    }).catch(function () { return false; });
+    function apply(before, after) {
+      if (before === after) return false;
+      try { if (after) localStorage.setItem("skhub_account", after); else localStorage.removeItem("skhub_account"); } catch (e) { /* 写せなくても、このページでは使える */ }
+      fillAvatars();
+      if ($("home") && !$("home").hidden && (view === "account" || view === "home")) renderStart();
+      return true;
+    }
+  }
+  // ログインのページから戻ってきたとき・ほかのウィンドウでログインしたあと（1 分に 1 回まで）
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && Date.now() - accountAt > 60000) syncAccount(); });
+  // ログインのページ（sk-hub.jp/account/）。終わったら、いま開いている Office のページに戻る（sk-hub.jp/office/… は office.sk-hub.jp に移る）
+  function loginUrl() {
+    var path = (BASE === "/" ? "/office" : "") + location.pathname + location.hash;
+    return SITE + "/account/?next=" + encodeURIComponent(path);
   }
   function isPinned(id) { return settings.pinned.indexOf(id) >= 0; }
   function setPinned(id, on) {
@@ -84,9 +156,10 @@
     if (d.toDateString() === now.toDateString()) return t("今日 {time}", { time: hm });
     var y = new Date(now); y.setDate(now.getDate() - 1);
     if (d.toDateString() === y.toDateString()) return t("昨日 {time}", { time: hm });
-    if (d.getFullYear() === now.getFullYear()) return t("{m}月{d}日", { m: d.getMonth() + 1, d: d.getDate() });
+    if (d.getFullYear() === now.getFullYear()) return t("{m}月{d}日 {time}", { m: d.getMonth() + 1, d: d.getDate(), time: hm });
     return t("{y}年{m}月{d}日", { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() });
   }
+  function bytes(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(1) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
   // ---------- パソコンでアプリとして入れたときのタイトルバー（Window Controls Overlay） ----------
   //   manifest の display_override で、ウィンドウのいちばん上の帯をページが使う。使っているあいだは <html class="is-wco">。
   //   エディタは、タイトルバー（アプリのアイコン・保存・ファイル名・検索・共有・アカウント）をそのまま帯にする。
@@ -141,16 +214,238 @@
     snackTimer = setTimeout(function () { snack.classList.remove("is-on"); }, 3200);
   }
 
-  // ---------- 小さなプレビュー（テンプレート・最近のファイル） ----------
-  function thumb(app, data) {
-    if (app === "doc") return '<div class="th th--doc" aria-hidden="true"><div class="th-doc">' + (data.html || "") + "</div></div>";
-    if (app === "sheet") return '<div class="th th--sheet" aria-hidden="true">' + sheetTable(data, 7, 5, false) + "</div>";
-    var s = (data.slides || [])[0] || { layout: "title" };
-    return '<div class="th th--slide" aria-hidden="true">' + slideHtml(s, false) + "</div>";
+  // ================================================================
+  //   メニュー（ボタンの下・右クリックしたところに出る）と色えらび
+  // ================================================================
+  //   menu(場所, items) → 選んだ value（やめたら null）。場所はボタンの要素か { x, y }
+  //   items: [{ value, label, icon, sub（右に出る文字。ショートカットなど）, checked, disabled, color（色の見本）} か { sep: 1 } か { head: "見出し" }]
+  var menuClose = null;
+  function closeMenu() { if (menuClose) menuClose(null); }
+  function placeBox(box, at) {
+    var x, y, r;
+    if (at && at.getBoundingClientRect) { r = at.getBoundingClientRect(); x = r.left; y = r.bottom + 4; }
+    else { x = at.x; y = at.y; }
+    box.style.left = "0px"; box.style.top = "0px";
+    var w = box.offsetWidth, h = box.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+    if (x + w > vw - 8) x = Math.max(8, vw - w - 8);
+    if (y + h > vh - 8) y = r ? Math.max(8, r.top - h - 4) : Math.max(8, vh - h - 8);
+    box.style.left = x + "px"; box.style.top = y + "px";
+  }
+  function popup(at, build) {
+    closeMenu();
+    return new Promise(function (resolve) {
+      var box = document.createElement("div");
+      box.className = "menu";
+      box.setAttribute("role", "menu");
+      document.body.appendChild(box);
+      var before = document.activeElement;
+      function done(v) {
+        if (!box.isConnected) return;
+        box.remove(); menuClose = null;
+        document.removeEventListener("pointerdown", outside, true);
+        document.removeEventListener("keydown", key, true);
+        window.removeEventListener("blur", blur);
+        if (before && before.focus && document.contains(before)) before.focus({ preventScroll: true });
+        resolve(v);
+      }
+      function outside(e) { if (!box.contains(e.target)) done(null); }
+      function blur() { done(null); }
+      function key(e) {
+        var items = Array.prototype.slice.call(box.querySelectorAll("[data-v]:not([disabled])")), i = items.indexOf(document.activeElement);
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(null); }
+        else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault(); e.stopPropagation();
+          if (items.length) items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1) + (i < 0 && e.key === "ArrowUp" ? 1 : 0)) % items.length].focus();
+        } else if (e.key === "Tab") { e.preventDefault(); done(null); }
+      }
+      build(box, done);
+      // 押したところの選択（文書の中で選んだ文字など）が外れないように
+      box.addEventListener("mousedown", function (e) { if (!e.target.closest("input")) e.preventDefault(); });
+      placeBox(box, at);
+      menuClose = done;
+      setTimeout(function () {
+        document.addEventListener("pointerdown", outside, true);
+        window.addEventListener("blur", blur);
+      }, 0);
+      document.addEventListener("keydown", key, true);
+      var first = box.querySelector('[data-v][aria-checked="true"]') || box.querySelector("[data-v]:not([disabled])");
+      if (first && !(at && at.x !== undefined && !at.getBoundingClientRect && at.noFocus)) first.focus({ preventScroll: true });
+    });
+  }
+  function menu(at, items) {
+    return popup(at, function (box, done) {
+      box.innerHTML = items.map(function (it, i) {
+        if (it.sep) return '<div class="menu__sep" role="separator"></div>';
+        if (it.head) return '<div class="menu__head">' + esc(it.head) + "</div>";
+        return '<button type="button" class="menu__item m3-state" role="menuitem' + (it.checked !== undefined ? "checkbox" : "") + '" data-v="' + i + '"' +
+          (it.checked !== undefined ? ' aria-checked="' + !!it.checked + '"' : "") + (it.disabled ? " disabled" : "") + ">" +
+          (it.color ? '<span class="menu__swatch" style="background:' + esc(it.color) + '"></span>' : it.icon ? icon(it.icon) : it.checked !== undefined ? icon(it.checked ? "check" : "") : '<span class="menu__pad"></span>') +
+          '<span class="menu__label"' + (it.style ? ' style="' + esc(it.style) + '"' : "") + ">" + esc(it.label) + "</span>" +
+          (it.sub ? '<span class="menu__sub">' + esc(it.sub) + "</span>" : "") + "</button>";
+      }).join("");
+      box.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-v]");
+        if (b && !b.disabled) done(items[+b.getAttribute("data-v")].value);
+      });
+    });
+  }
+  // 色えらび。palette(場所, { none: "なし" の文字（出さないときは省く）, value }) → "#rrggbb"・"none"・null（やめた）
+  var SWATCH = [
+    ["#000000", "#434343", "#666666", "#999999", "#b7b7b7", "#d9d9d9", "#efefef", "#ffffff"],
+    ["#ba1a1a", "#ea580c", "#f59e0b", "#16a34a", "#0d9488", "#2563eb", "#7c3aed", "#db2777"],
+    ["#fecaca", "#fed7aa", "#fde68a", "#bbf7d0", "#99f6e4", "#bfdbfe", "#ddd6fe", "#fbcfe8"],
+    ["#7f1d1d", "#9a3412", "#92400e", "#14532d", "#134e4a", "#1e3a8a", "#4c1d95", "#831843"]
+  ];
+  function palette(at, opts) {
+    opts = opts || {};
+    return popup(at, function (box, done) {
+      box.classList.add("menu--palette");
+      box.innerHTML = (opts.none ? '<button type="button" class="menu__item m3-state" data-v="none">' + icon("format_color_reset") + '<span class="menu__label">' + esc(opts.none) + "</span></button>" : "") +
+        '<div class="palette">' + SWATCH.map(function (row) {
+          return row.map(function (c) { return '<button type="button" class="palette__c" data-v="' + c + '" style="background:' + c + '" title="' + c + '" aria-label="' + c + '"' + (opts.value === c ? ' aria-checked="true"' : "") + "></button>"; }).join("");
+        }).join("") + "</div>" +
+        '<label class="menu__item palette__more">' + icon("palette") + '<span class="menu__label">' + esc(t("その他の色")) + '</span><input type="color" value="' + esc(/^#[0-9a-f]{6}$/i.test(opts.value || "") ? opts.value : "#2563eb") + '"></label>';
+      box.addEventListener("click", function (e) { var b = e.target.closest("[data-v]"); if (b) done(b.getAttribute("data-v")); });
+      box.querySelector('input[type="color"]').addEventListener("change", function (e) { done(e.target.value); });
+    });
+  }
+  // 画像を選んで data: URL にする（ファイルの中に一緒に保存する）。大きな写真は縮める
+  function pickFile(accept) {
+    return new Promise(function (resolve) {
+      var input = document.createElement("input");
+      input.type = "file"; input.accept = accept || "";
+      input.addEventListener("change", function () { resolve(input.files[0] || null); });
+      input.click();
+    });
+  }
+  function imageData(f) {
+    return new Promise(function (resolve) {
+      if (!f || !/^image\//.test(f.type)) { if (f) notify(t("画像のファイルを選んでください")); return resolve(null); }
+      var r = new FileReader();
+      r.onload = function () {
+        var src = r.result;
+        if (f.type === "image/svg+xml" || f.type === "image/gif" || f.size < 400000) return resolve(src);
+        // 大きい写真は、長い辺を 1600px にして JPEG（透明があるときは PNG）にする
+        var img = new Image();
+        img.onload = function () {
+          var k = Math.min(1, 1600 / Math.max(img.width, img.height)), cv = document.createElement("canvas");
+          cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          var out = cv.toDataURL(f.type === "image/png" ? "image/png" : "image/jpeg", 0.85);
+          resolve(out.length < src.length ? out : src);
+        };
+        img.onerror = function () { resolve(src); };
+        img.src = src;
+      };
+      r.readAsDataURL(f);
+    });
+  }
+  function pickImage() { return pickFile("image/*").then(imageData); }
+  // ファイルとして書き出す（Chrome・Edge は保存する場所を選ぶ。それ以外はダウンロード）
+  function saveBlob(name, blob, desc, mime, ext) {
+    if (typeof window.showSaveFilePicker === "function" && ext) {
+      var accept = {}; accept[mime || blob.type || "application/octet-stream"] = [ext];
+      return window.showSaveFilePicker({ suggestedName: name, types: [{ description: desc || name, accept: accept }] }).then(function (h) {
+        return h.createWritable().then(function (w) { return w.write(blob).then(function () { return w.close(); }); }).then(function () { return true; });
+      }, function (e) { return e && e.name === "AbortError" ? false : download(); });
+    }
+    return Promise.resolve(download());
+    function download() {
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+      return true;
+    }
   }
 
   // ================================================================
-  //   スタート画面（Office の「ホーム・新規・開く・アカウント・オプション」）
+  //   アプリに渡す道具（O）。アプリのファイル（doc.js など）は、これだけを使う
+  // ================================================================
+  var O = {
+    APP: APP, t: t, esc: esc, icon: icon, $: $, copy: copy, notify: notify, when: when,
+    file: function () { return current; },
+    data: function () { return current ? current.data : null; },
+    // 中身を変えたら呼ぶ（保存して、元に戻すために覚える）。typing: 文字を打っているあいだ（まとめて 1 回にする）
+    changed: function (typing) { changed(typing); },
+    record: function () { record(); },
+    stat: function (html) { var el = $("stat"); if (el) el.innerHTML = html; },
+    sync: function () { syncRibbon(); },
+    menu: menu, palette: palette, closeMenu: closeMenu,
+    pickImage: pickImage, pickFile: pickFile, imageData: imageData, saveBlob: saveBlob,
+    zoom: function () { return zoom / 100; },
+    readMode: function () { return readMode; },
+    userName: userName,
+    base: BASE,
+    fileName: function (ext) { return (current ? current.name : "file").replace(/[\\/:*?"<>|]/g, "_") + ext; }
+  };
+  var CLIP = { label: t("クリップボード"), items: [
+    { big: 1, icon: "content_paste", label: t("貼り付け"), cmd: "paste" },
+    { stack: [{ icon: "content_cut", label: t("切り取り"), cmd: "cut" }, { icon: "content_copy", label: t("コピー"), cmd: "copy" }, { icon: "format_paint", label: t("書式のコピー"), cmd: "painter", toggle: "painter" }] }
+  ] };
+  var ZOOM = { label: t("ズーム"), items: [
+    { big: 1, icon: "search", label: t("ズーム"), cmd: "zoom" },
+    { stack: [{ icon: "zoom_in", label: t("拡大"), cmd: "zoomIn" }, { icon: "zoom_out", label: t("縮小"), cmd: "zoomOut" }, { icon: "fit_screen", label: "100%", cmd: "zoom100" }] }
+  ] };
+  var VIEW = { label: t("表示"), items: [
+    { big: 1, icon: "print", label: t("印刷"), cmd: "print" },
+    { stack: [{ icon: "menu_book", label: t("閲覧モード"), cmd: "read", toggle: "read" }, { icon: "keyboard", label: t("ショートカット"), cmd: "keys" }] }
+  ] };
+  O.groups = { clip: CLIP, zoom: ZOOM, view: VIEW };
+  // フォントの一覧（[表示する名前, CSS の font-family]）。PC に入っていないフォントは、近いもので出る
+  O.fonts = [
+    ["M PLUS 1", '"M PLUS 1", sans-serif'], ["游ゴシック", '"Yu Gothic", YuGothic, "Hiragino Sans", sans-serif'], ["メイリオ", 'Meiryo, "Hiragino Sans", sans-serif'],
+    ["BIZ UDPゴシック", '"BIZ UDPGothic", "Yu Gothic", sans-serif'], ["游明朝", '"Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif'], ["BIZ UD明朝", '"BIZ UDMincho", "Yu Mincho", serif'],
+    ["Arial", "Arial, Helvetica, sans-serif"], ["Times New Roman", '"Times New Roman", Times, serif'], ["Georgia", "Georgia, serif"], ["Consolas", "Consolas, Menlo, monospace"]
+  ];
+  O.fontCss = function (name) {
+    for (var i = 0; i < O.fonts.length; i++) if (O.fonts[i][0] === name) return O.fonts[i][1];
+    return '"' + String(name).replace(/["\\;{}<>]/g, "") + '", sans-serif';
+  };
+  O.sizes = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 60, 72];
+  // ライト・ダークのどちらで見ているか（グラフの色に使う）
+  O.dark = function () { var th = root.getAttribute("data-theme"); return th ? th === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches; };
+  var factory = window.OfficeApps && window.OfficeApps[APP];
+  var App = factory ? factory(O) : null;
+
+  // ---------- 元に戻す・やり直し（ファイルの中身をまるごと覚える） ----------
+  var hist = { stack: [], i: -1, timer: null, size: 0 };
+  function record() {
+    clearTimeout(hist.timer); hist.timer = null;
+    if (!current) return;
+    var s = JSON.stringify(current.data);
+    if (hist.stack[hist.i] === s) return;
+    hist.stack = hist.stack.slice(0, hist.i + 1);
+    hist.stack.push(s);
+    // 100 回まで・合わせて 60MB まで（画像の多いファイルで重くならないように）
+    hist.size = hist.stack.reduce(function (a, x) { return a + x.length; }, 0);
+    while (hist.stack.length > 2 && (hist.stack.length > 100 || hist.size > 60000000)) hist.size -= hist.stack.shift().length;
+    hist.i = hist.stack.length - 1;
+  }
+  function resetHist() { clearTimeout(hist.timer); hist.timer = null; hist.stack = current ? [JSON.stringify(current.data)] : []; hist.i = hist.stack.length - 1; }
+  function changed(typing) {
+    if (!current) return;
+    if (typing) { clearTimeout(hist.timer); hist.timer = setTimeout(record, 700); }
+    else record();
+    saveSoon();
+  }
+  function restore(dir) {
+    if (hist.timer) record();
+    var n = hist.i + dir;
+    if (n < 0 || n >= hist.stack.length) { notify(dir < 0 ? t("これ以上、元に戻せません") : t("これ以上、やり直せません")); return; }
+    hist.i = n;
+    current.data = JSON.parse(hist.stack[n]);
+    App.render({ restore: true });
+    setZoom(zoom);
+    syncRibbon();
+    saveSoon();
+  }
+
+  // ---------- 小さなプレビュー（テンプレート・最近のファイル） ----------
+  function thumb(data, blank) { return App && App.thumb ? App.thumb(data, blank) : ""; }
+
+  // ================================================================
+  //   スタート画面（Office の「ホーム・新規・開く・情報・エクスポート・アカウント・オプション」）
   // ================================================================
   var view = "home", fileTab = "recent", query = "", current = null;
 
@@ -167,12 +462,14 @@
     // 「ファイル」で開いたときの滑りこみは 1 回だけ（ほかの画面に移ったら、ふつうの出方にもどす）
     if ($("home")) $("home").classList.remove("is-backstage");
     animateFiles = true;
+    if (!current && (view === "info" || view === "export")) view = "home";
     var rail = '<nav class="rail" aria-label="' + esc(t("メニュー")) + '">' +
       (current ? railBtn("data-back-edit", "arrow_back", t("戻る")) : "") +
       '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + icon(a ? a.icon : "apps", true) + "</span><span>" + (a ? a.name : "Office") + "</span></a>" +
       railItem("home", "home", t("ホーム")) +
       (a ? railItem("new", "note_add", t("新規")) + railItem("open", "folder_open", t("開く")) : "") +
-      (current ? railBtn("data-save-as", "save_as", t("コピーを保存")) + railBtn("data-close-file", "close", t("閉じる")) : "") +
+      (current ? railItem("info", "info", t("情報")) + railBtn("data-save-as", "save_as", t("コピーを保存")) + railItem("export", "ios_share", t("エクスポート")) +
+        railBtn("data-print", "print", t("印刷")) + railBtn("data-close-file", "close", t("閉じる")) : "") +
       '<span class="rail__space"></span>' +
       (a ? '<a class="rail__item" href="' + BASE + '"><span class="rail__pill">' + icon("apps") + "</span><span>" + esc(t("アプリ")) + "</span></a>"
          : '<a class="rail__item" href="' + SITE + '/products/office/"><span class="rail__pill">' + icon("info") + "</span><span>" + esc(t("紹介")) + "</span></a>") +
@@ -180,15 +477,17 @@
       railItem("account", "account_circle", t("アカウント")) +
       railItem("options", "settings", t("オプション")) +
       "</nav>";
-    var main = view === "new" ? viewNew() : view === "open" ? viewOpen() : view === "account" ? viewAccount() : view === "options" ? viewOptions() : viewHome();
+    var main = view === "new" ? viewNew() : view === "open" ? viewOpen() : view === "account" ? viewAccount() : view === "options" ? viewOptions()
+      : view === "info" ? viewInfo() : view === "export" ? viewExport() : viewHome();
     // アプリとして入れたときだけ見える、ウィンドウのいちばん上の帯（is-wco）
     var bar = '<header class="wco-bar"><span class="wco-bar__logo">' + icon(a ? a.icon : "apps", true) + '</span><span class="wco-bar__name">' + (a ? a.name : "SK Hub Office") + "</span>" +
       (a ? '<span class="wco-bar__sub">SK Hub Office</span>' : "") +
-      '<span class="wco-bar__space"></span><button type="button" class="wco-search m3-state" data-todo="' + esc(t("検索")) + '">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
+      '<span class="wco-bar__space"></span><button type="button" class="wco-search m3-state" data-cmd="find">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
       '<span class="wco-bar__space"></span><button type="button" class="tbar-avatar" data-view="account" data-avatar aria-label="' + esc(t("アカウント")) + '" title="' + esc(t("アカウント")) + '"></button></header>';
     $("home").innerHTML = bar + rail + '<main class="start__main" id="start-main">' + main + "</main>";
     if (view === "new") filterTemplates("all");
     if (view === "home" || view === "open") renderFileTable();
+    if (view === "info") renderVersions();
     renderLegacy();
     fillAvatars();
   }
@@ -226,6 +525,10 @@
         return '<button type="button" class="chip m3-state" role="radio" aria-checked="' + (i === 0) + '" data-cat="' + c[0] + '">' + icon("check") + esc(c[1]) + "</button>";
       }).join("") + '</div><div class="tpl-grid" id="tpl-grid">' + (TEMPLATES[APP] || []).map(function (tp) { return tplCard(APP, tp); }).join("") + "</div></section>";
   }
+  function importLabel() {
+    var x = App && App.imports ? App.imports.label : "";
+    return x ? t(".skdoc・.sksheet・.skslide と {more} を開く", { more: x }) : t(".skdoc・.sksheet・.skslide を開く");
+  }
   function viewOpen() {
     var s = Store.state();
     var here = s === "unsupported" ? ["public", t("このブラウザ"), t("ブラウザの中に保存したファイル")]
@@ -236,20 +539,93 @@
         '<div class="open__places" role="list">' +
           '<button type="button" class="place is-on m3-state" role="listitem">' + icon(here[0]) + "<span><strong>" + esc(here[1]) + "</strong><small>" + esc(here[2]) + "</small></span></button>" +
           (Store.supported ? '<button type="button" class="place m3-state" role="listitem" data-pick>' + icon("drive_folder_upload") + "<span><strong>" + esc(t("フォルダを変更")) + "</strong><small>" + esc(t("ほかのフォルダに保存する")) + "</small></span></button>" : "") +
-          '<button type="button" class="place m3-state" role="listitem" data-import>' + icon("upload_file") + "<span><strong>" + esc(t("参照")) + "</strong><small>" + esc(t(".skdoc・.sksheet・.skslide を開く")) + "</small></span></button>" +
-          '<button type="button" class="place m3-state" role="listitem" data-todo="' + esc(t("SK Hub Systems アカウント")) + '">' + icon("cloud") + "<span><strong>" + esc(t("SK Hub Systems アカウント")) + "</strong><small>" + esc(t("もうすぐ使えます")) + "</small></span></button>" +
+          '<button type="button" class="place m3-state" role="listitem" data-import>' + icon("upload_file") + "<span><strong>" + esc(t("参照")) + "</strong><small>" + esc(importLabel()) + "</small></span></button>" +
+          '<button type="button" class="place m3-state" role="listitem" data-todo="' + esc(t("SK Hub Systems アカウント")) + '">' + icon("cloud") + "<span><strong>" + esc(t("SK Hub Systems アカウント")) + "</strong><small>" + esc(t("インターネット上への保存は準備中です")) + "</small></span></button>" +
         '</div><div class="open__main"><div id="legacy"></div>' + fileSection(false) + "</div>" +
       "</div>";
   }
+  // 情報（ファイルのこと・版の履歴）
+  function viewInfo() {
+    var f = current, a = APPS[APP];
+    return '<h1 class="start__h1">' + esc(t("情報")) + "</h1>" +
+      '<section class="info-card"><span class="info-card__ico frow__ico" data-app="' + APP + '">' + icon(a.icon, true) + '</span><div class="info-card__text"><strong data-i18n-skip>' + esc(f.name) + "</strong><small>" +
+        esc(f.outside ? t("フォルダの外のファイル（直接保存しています）") : Store.state() === "ready" ? t("フォルダ「{name}」", { name: Store.folderName() }) : t("このブラウザ")) + "</small></div>" +
+        '<button type="button" class="text-btn m3-state" data-rename>' + esc(t("名前を変更")) + "</button></section>" +
+      '<dl class="props"><dt>' + esc(t("更新日時")) + "</dt><dd>" + esc(when(f.updated || Date.now())) + "</dd><dt>" + esc(t("作成日時")) + "</dt><dd>" + esc(when(f.created || Date.now())) + "</dd>" +
+        "<dt>" + esc(t("大きさ")) + "</dt><dd>" + esc(bytes(JSON.stringify(f.data).length)) + "</dd>" + (App.props ? App.props().map(function (p) { return "<dt>" + esc(p[0]) + "</dt><dd>" + esc(p[1]) + "</dd>"; }).join("") : "") + "</dl>" +
+      '<section class="start__sec"><div class="files-head"><h2 class="start__h2">' + esc(t("版の履歴")) + '</h2><button type="button" class="m3-btn m3-btn--tonal m3-state" data-keep-version>' + icon("bookmark_add") + esc(t("いまの版を残す")) + "</button></div>" +
+        '<p class="sec-text">' + esc(t("保存したとき・開いたとき・10 分ごとに、前の版をこのブラウザに残します（20 個まで）。押すと、その版に戻せます。")) + "</p>" +
+        '<div class="ftable" id="versions"><div class="files-loading">' + esc(t("読み込んでいます…")) + "</div></div></section>";
+  }
+  function renderVersions() {
+    var box = $("versions");
+    if (!box || !current) return;
+    Store.versions(current.id).then(function (list) {
+      if (!$("versions")) return;
+      if (!list.length) { box.innerHTML = '<div class="files-loading">' + esc(t("まだ前の版はありません。")) + "</div>"; return; }
+      box.innerHTML = list.map(function (v, i) {
+        return '<div class="frow" data-app="' + APP + '"><button type="button" class="frow__open m3-state" data-restore="' + i + '"><span class="frow__ico">' + icon("history") + '</span><span class="frow__text"><span class="frow__name">' + esc(when(v.ts)) + '</span><span class="frow__meta">' + esc(bytes(v.size)) + "</span></span></button>" +
+          '<span class="ftable__when"></span><span class="frow__act"><button type="button" class="text-btn m3-state" data-restore="' + i + '">' + esc(t("この版に戻す")) + "</button></span></div>";
+      }).join("");
+    });
+  }
+  function restoreVersion(i) {
+    Store.versions(current.id).then(function (list) {
+      var v = list[i];
+      if (!v) return;
+      return M3.confirm({ title: t("この版に戻しますか？"), text: t("{when} の版に戻します。いまの中身も、版の履歴に残します。", { when: when(v.ts) }), ok: t("戻す"), icon: "history" }).then(function (ok) {
+        if (!ok) return;
+        return Store.addVersion(current.id, current.data).then(function () {
+          current.data = JSON.parse(v.data);
+          if (App.upgrade) App.upgrade(current.data);
+          record();
+          backToEditor();
+          App.render({ restore: true });
+          setZoom(zoom);
+          saveSoon();
+          notify(t("前の版に戻しました"));
+        });
+      });
+    });
+  }
+  // エクスポート（ほかの形式で書き出す）
+  function viewExport() {
+    var list = [{ id: "sk", icon: "save_as", label: t("SK Hub Office のファイル"), desc: t("{ext} のファイルとして、好きな場所に保存します", { ext: Store.EXT[APP] }) },
+      { id: "pdf", icon: "picture_as_pdf", label: "PDF", desc: t("印刷の画面で「PDF に保存」を選びます") }].concat(App.exports || []);
+    return '<h1 class="start__h1">' + esc(t("エクスポート")) + "</h1>" +
+      '<div class="export-grid">' + list.map(function (x) {
+        return '<button type="button" class="export-card m3-state" data-export="' + esc(x.id) + '">' + icon(x.icon) + "<span><strong>" + esc(x.label) + "</strong><small>" + esc(x.desc || "") + "</small></span></button>";
+      }).join("") + "</div>" +
+      '<p class="start__note">' + esc(t("Office の形式（.docx・.xlsx・.pptx）は、文字・表・図の主なものを書き出します。細かい書式は変わることがあります。")) + "</p>";
+  }
+  function exportAs(id) {
+    if (!current) return;
+    flush();
+    if (id === "sk") { Store.exportFile(current).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(failed); return; }
+    if (id === "pdf") { backToEditor(); setTimeout(doPrint, 300); return; }
+    Promise.resolve(App.exportAs(id)).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(function (e) {
+      if (window.console) console.error(e);
+      notify(t("書き出せませんでした"));
+    });
+  }
   function viewAccount() {
     var hint = accountHint(), name = userName(), a = APPS[APP] || { icon: "apps" };
+    // アプリとして入れたウィンドウからは、ブラウザでログインのページを開く（戻ってきたら、ログインの状態を読みなおす）
+    var target = standalone ? ' target="_blank" rel="noopener"' : "";
+    if (bridge && Date.now() - accountAt > 5000) setTimeout(function () { syncAccount(true); }, 0);
     return '<h1 class="start__h1">' + esc(t("アカウント")) + "</h1>" +
       '<section class="acct-card"><span class="acct-avatar" data-avatar aria-hidden="true"></span>' +
         '<div class="acct-card__text"><strong>' + esc(name || t("名前が設定されていません")) + "</strong><small>" + esc(hint && hint.email ? hint.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div>" +
-        '<button type="button" class="text-btn m3-state" data-view="options">' + esc(t("名前を変更")) + "</button></section>" +
-      '<section class="start__sec"><h2 class="start__h2">SK Hub Systems ' + esc(t("アカウント")) + '</h2><p class="sec-text">' +
-        esc(hint ? t("sk-hub.jp に {name} さんとしてログインしています。SK Hub Office とつなぐ機能は、もうすぐ使えます。", { name: hint.name || hint.email }) : t("ログインすると、いろいろな端末で同じファイルを開けるようになる予定です。いまは、ファイルはこの PC に保存されるので、ログインしなくても使えます。")) +
-        '</p><div class="btn-row"><a class="m3-btn m3-btn--tonal m3-state" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("open_in_new") + esc(t("アカウントのページを開く")) + "</a></div></section>" +
+        (hint ? '<span class="acct-badge">' + icon("verified_user", true) + esc(t("ログイン中")) + "</span>" : '<button type="button" class="text-btn m3-state" data-view="options">' + esc(t("名前を変更")) + "</button>") + "</section>" +
+      '<section class="start__sec"><h2 class="start__h2">SK Hub Systems ' + esc(t("アカウント")) + "</h2>" +
+        (hint
+          ? '<p class="sec-text">' + esc(t("{name} さんとしてログインしています。名前やアイコンの変更・ログアウトは、アカウントのページで行います。", { name: hint.name || hint.email })) + "</p>" +
+            // ログイン中に ?next= 付きで開くと、すぐ戻ってきてしまうので、管理のページはそのまま開く（戻ってきたら、ログインの状態を読みなおす）
+            '<div class="btn-row"><a class="m3-btn m3-btn--tonal m3-state" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("manage_accounts") + esc(t("アカウントの管理・ログアウト")) + "</a></div>"
+          : '<p class="sec-text">' + esc(t("ログインすると、Office でもアカウントの名前とアイコンが出ます。ログインのページは sk-hub.jp で開き、終わったらこの画面に戻ります。")) + "</p>" +
+            '<div class="btn-row"><a class="m3-btn m3-state" href="' + esc(loginUrl()) + '"' + target + ">" + icon("login") + esc(t("ログイン")) + "</a>" +
+            '<a class="text-btn m3-state" href="' + SITE + '/account/" target="_blank" rel="noopener">' + esc(t("アカウントを作る")) + "</a></div>") +
+        '<div class="note-card">' + icon("folder") + "<p>" + esc(t("ファイルは、ログインしてもしなくても、この PC に保存されます。インターネット上への保存（ほかの端末で開く・共有する）は準備中です。")) + "</p></div></section>" +
       '<section class="start__sec"><h2 class="start__h2">' + esc(t("製品情報")) + '</h2>' +
         '<div class="about"><span class="about__logo">' + icon(a.icon, true) + '</span><div><strong>SK Hub Office</strong><small>' + esc(t("バージョン {v}（開発中）", { v: VERSION })) + "</small></div></div>" +
         '<p class="sec-text">' + esc(t("文書の Doc・表計算の Sheet・スライドの Slide をまとめた、SK のオフィスアプリです。見た目は SK Material（Google の Material Design 3 がもと）です。")) + "</p>" +
@@ -265,7 +641,7 @@
     var themes = [["auto", "brightness_auto", t("端末に合わせる")], ["light", "light_mode", t("ライト")], ["dark", "dark_mode", t("ダーク")]];
     return '<h1 class="start__h1">' + esc(t("オプション")) + "</h1>" +
       '<section class="opts"><h2 class="opts__title">' + esc(t("全般")) + "</h2>" +
-        optRow("badge", t("ユーザー名"), t("あいさつとアカウントのアイコンに出ます"), '<input class="opt-input" id="opt-user" maxlength="40" autocomplete="nickname" placeholder="' + esc(t("例：SK")) + '" value="' + esc(settings.user) + '" aria-label="' + esc(t("ユーザー名")) + '">') +
+        optRow("badge", t("ユーザー名"), t("あいさつ・アカウントのアイコン・コメントに出ます"), '<input class="opt-input" id="opt-user" maxlength="40" autocomplete="nickname" placeholder="' + esc(t("例：SK")) + '" value="' + esc(settings.user) + '" aria-label="' + esc(t("ユーザー名")) + '">') +
       "</section>" +
       '<section class="opts"><h2 class="opts__title">' + esc(t("表示")) + "</h2>" +
         optRow("contrast", t("テーマ"), "", '<div class="tbs-seg" role="radiogroup" aria-label="' + esc(t("テーマ")) + '">' + themes.map(function (x) {
@@ -313,7 +689,7 @@
   function tplCard(app, tp) {
     var blank = tp.cat === "blank";
     return '<button type="button" class="tpl m3-state" data-tpl="' + esc(tp.id) + '" data-cat="' + esc(tp.cat) + '">' +
-      thumb(app, blank ? { html: "", cells: {}, slides: [{ layout: "blank" }] } : tp.data) +
+      thumb(copy(tp.data), blank) +
       '<span class="tpl__name">' + esc(blank ? APPS[app].blank : t(tp.name)) + "</span></button>";
   }
   function filterTemplates(cat) {
@@ -376,15 +752,15 @@
       return Store.create(APP, tp.cat === "blank" ? APPS[APP].untitled : t(tp.name), tp.id, copy(tp.data)).then(function (f) { openFile(f.id); });
     }).catch(failed);
   }
-  function fileActions(id, name) {
-    if (!window.M3) return;
-    M3.choose({ title: name, options: [
+  function fileActions(id, name, at) {
+    menu(at, [
       { value: "open", label: t("開く"), icon: "open_in_new" },
       { value: "rename", label: t("名前を変更"), icon: "edit" },
       { value: "copy", label: t("コピーを作る"), icon: "content_copy" },
       { value: "export", label: t("ファイルとして書き出す"), icon: "download" },
+      { sep: 1 },
       { value: "delete", label: t("削除"), icon: "delete" }
-    ] }).then(function (v) {
+    ]).then(function (v) {
       if (!v) return;
       if (v === "open") return Store.get(id).then(function (f) { if (f) openFile(f.id, f.app); });
       if (v === "rename") return Store.get(id).then(function (f) { if (f) renameFile(f, renderFileTable); });
@@ -396,7 +772,7 @@
         return M3.confirm({ title: t("「{name}」を削除しますか？", { name: name }),
           text: Store.state() === "unsupported" ? t("このブラウザから消えます。元に戻すことはできません。") : t("フォルダ「{folder}」からファイルを削除します。ごみ箱には入らず、元に戻すことはできません。", { folder: Store.folderName() }),
           ok: t("削除"), danger: true, icon: "delete" })
-          .then(function (ok) { if (!ok) return; return Store.remove(id).then(function () { setPinned(id, false); renderFileTable(); notify(t("削除しました")); }); });
+          .then(function (ok) { if (!ok) return; return Store.remove(id).then(function () { setPinned(id, false); Store.dropVersions(id); renderFileTable(); notify(t("削除しました")); }); });
       }
     }).catch(failed);
   }
@@ -406,7 +782,7 @@
       if (!v || v === f.name) return;
       var old = f.id;
       return Store.rename(f, v).then(function () {
-        if (old !== f.id && isPinned(old)) { setPinned(old, false); setPinned(f.id, true); }
+        if (old !== f.id) { Store.moveVersions(old, f.id); if (isPinned(old)) { setPinned(old, false); setPinned(f.id, true); } }
         if (done) done();
       });
     }).catch(function (e) {
@@ -414,21 +790,26 @@
       else failed(e);
     });
   }
+  // ほかの場所のファイルを開く（SK Hub Office のファイル・アプリが読める Office のファイルなど）
   function importFile() {
     ensureFolder().then(function (ok) {
       if (!ok) return;
-      var pick = typeof window.showOpenFilePicker === "function"
-        ? window.showOpenFilePicker({ types: [{ description: "SK Hub Office", accept: { "application/json": [".skdoc", ".sksheet", ".skslide"] } }] }).then(function (hs) { return hs[0].getFile(); }, function () { return null; })
-        : new Promise(function (resolve) {
-            var input = document.createElement("input");
-            input.type = "file"; input.accept = ".skdoc,.sksheet,.skslide";
-            input.addEventListener("change", function () { resolve(input.files[0] || null); });
-            input.click();
-          });
-      return pick.then(function (file) {
+      var more = App && App.imports ? App.imports.accept : "";
+      return pickFile(".skdoc,.sksheet,.skslide" + (more ? "," + more : "")).then(function (file) {
         if (!file) return;
-        return Store.importFile(file).then(function (f) { notify(t("「{name}」を読み込みました", { name: f.name })); openFile(f.id, f.app); },
-          function () { notify(t("SK Hub Office のファイルではないので、開けませんでした")); });
+        if (Store.appOf(file.name)) {
+          return Store.importFile(file).then(function (f) { notify(t("「{name}」を読み込みました", { name: f.name })); openFile(f.id, f.app); },
+            function () { notify(t("SK Hub Office のファイルではないので、開けませんでした")); });
+        }
+        if (!more) { notify(t("このアプリでは開けないファイルです")); return; }
+        notify(t("読み込んでいます…"));
+        return Promise.resolve(App.importFile(file)).then(function (data) {
+          var name = file.name.replace(/\.[^.]+$/, "") || APPS[APP].untitled;
+          return Store.create(APP, name, "import", data).then(function (f) { notify(t("「{name}」を読み込みました", { name: f.name })); openFile(f.id); });
+        }, function (e) {
+          if (window.console) console.error(e);
+          notify(e && e.message === "no-inflate" ? t("このブラウザでは、このファイルを読み込めません") : t("読み込めませんでした。ファイルがこわれているかもしれません"));
+        });
       });
     }).catch(failed);
   }
@@ -436,132 +817,42 @@
   // ================================================================
   //   エディタ（タイトルバー・リボン・ステータスバー）
   // ================================================================
-  // リボン: [{ tab, groups: [{ label, items }] }]
+  // リボン（アプリの App.ribbon）: [{ tab, groups: [{ label, items }] }]
   //   items の 1 つ: { big, icon, label } … 大きなボタン / { stack: [{ icon, label }] } … 文字つきの小さなボタンを縦に
-  //                  { rows: [[{ icon, label } か { chip, w }]] } … アイコンだけのボタンの行 / { styles: [{ tag, label }] } … スタイルの一覧（Doc）
-  //   cmd があれば動く（COMMANDS）。todo: 1 は「まだ使えません」。toggle: "bold" などは、選んだところの状態でオンに見せる（Doc）
-  var CLIP = { label: t("クリップボード"), items: [
-    { big: 1, icon: "content_paste", label: t("貼り付け"), todo: 1 },
-    { stack: [{ icon: "content_cut", label: t("切り取り"), todo: 1 }, { icon: "content_copy", label: t("コピー"), todo: 1 }, { icon: "format_paint", label: t("書式のコピー"), todo: 1 }] }
-  ] };
-  var ZOOM = { label: t("ズーム"), items: [
-    { big: 1, icon: "search", label: t("ズーム"), cmd: "zoom" },
-    { stack: [{ icon: "zoom_in", label: t("拡大"), cmd: "zoomIn" }, { icon: "zoom_out", label: t("縮小"), cmd: "zoomOut" }, { icon: "fit_screen", label: "100%", cmd: "zoom100" }] }
-  ] };
-  var RIBBON = {
-    doc: [
-      { tab: t("ホーム"), groups: [CLIP,
-        { label: t("フォント"), items: [{ rows: [
-          [{ chip: "M PLUS 1", w: 132, todo: 1 }, { chip: "10.5", w: 64, todo: 1 }],
-          [{ icon: "format_bold", label: t("太字"), cmd: "bold", toggle: "bold" }, { icon: "format_italic", label: t("斜体"), cmd: "italic", toggle: "italic" },
-           { icon: "format_underlined", label: t("下線"), cmd: "underline", toggle: "underline" }, { icon: "format_strikethrough", label: t("取り消し線"), cmd: "strikeThrough", toggle: "strikeThrough" },
-           { icon: "format_color_text", label: t("文字の色"), todo: 1 }, { icon: "ink_highlighter", label: t("蛍光ペン"), todo: 1 }]
-        ] }] },
-        { label: t("段落"), items: [{ rows: [
-          [{ icon: "format_list_bulleted", label: t("箇条書き"), cmd: "insertUnorderedList", toggle: "insertUnorderedList" }, { icon: "format_list_numbered", label: t("段落番号"), cmd: "insertOrderedList", toggle: "insertOrderedList" },
-           { icon: "format_indent_decrease", label: t("インデントを減らす"), cmd: "outdent" }, { icon: "format_indent_increase", label: t("インデントを増やす"), cmd: "indent" }],
-          [{ icon: "format_align_left", label: t("左揃え"), cmd: "justifyLeft", toggle: "justifyLeft" }, { icon: "format_align_center", label: t("中央揃え"), cmd: "justifyCenter", toggle: "justifyCenter" },
-           { icon: "format_align_right", label: t("右揃え"), cmd: "justifyRight", toggle: "justifyRight" }, { icon: "format_align_justify", label: t("両端揃え"), cmd: "justifyFull", toggle: "justifyFull" }]
-        ] }] },
-        { label: t("スタイル"), items: [{ styles: [{ tag: "p", label: t("標準") }, { tag: "h1", label: t("表題") }, { tag: "h2", label: t("見出し 1") }, { tag: "h3", label: t("見出し 2") }, { tag: "blockquote", label: t("引用") }] }] },
-        { label: t("編集"), items: [{ stack: [{ icon: "search", label: t("検索"), todo: 1 }, { icon: "find_replace", label: t("置換"), todo: 1 }, { icon: "select_all", label: t("すべて選択"), cmd: "selectAll" }] }] }
-      ] },
-      { tab: t("挿入"), groups: [
-        { label: t("ページ"), items: [{ big: 1, icon: "insert_page_break", label: t("改ページ"), todo: 1 }] },
-        { label: t("表"), items: [{ big: 1, icon: "table", label: t("表"), cmd: "table" }] },
-        { label: t("図"), items: [{ big: 1, icon: "image", label: t("画像"), todo: 1 }, { stack: [{ icon: "category", label: t("図形"), todo: 1 }, { icon: "bar_chart", label: t("グラフ"), todo: 1 }] }] },
-        { label: t("リンク"), items: [{ big: 1, icon: "link", label: t("リンク"), cmd: "link" }] },
-        { label: t("テキスト"), items: [{ stack: [{ icon: "horizontal_rule", label: t("横線"), cmd: "hr" }, { icon: "today", label: t("日付"), cmd: "date" }] }] }
-      ] },
-      { tab: t("レイアウト"), groups: [
-        { label: t("ページ設定"), items: [{ big: 1, icon: "margin", label: t("余白"), todo: 1 }, { big: 1, icon: "crop_rotate", label: t("印刷の向き"), todo: 1 }, { big: 1, icon: "crop_portrait", label: t("サイズ"), todo: 1 }] }
-      ] },
-      { tab: t("校閲"), groups: [
-        { label: t("文章校正"), items: [{ big: 1, icon: "spellcheck", label: t("スペル チェック"), todo: 1 }, { big: 1, icon: "123", label: t("文字カウント"), cmd: "count" }] },
-        { label: t("コメント"), items: [{ big: 1, icon: "add_comment", label: t("新しいコメント"), todo: 1 }] }
-      ] },
-      { tab: t("表示"), groups: [ZOOM] }
-    ],
-    sheet: [
-      { tab: t("ホーム"), groups: [CLIP,
-        { label: t("フォント"), items: [{ rows: [
-          [{ chip: "M PLUS 1", w: 132, todo: 1 }, { chip: "11", w: 56, todo: 1 }],
-          [{ icon: "format_bold", label: t("太字"), todo: 1 }, { icon: "format_italic", label: t("斜体"), todo: 1 }, { icon: "format_underlined", label: t("下線"), todo: 1 },
-           { icon: "border_all", label: t("罫線"), todo: 1 }, { icon: "format_color_fill", label: t("塗りつぶしの色"), todo: 1 }]
-        ] }] },
-        { label: t("配置"), items: [{ rows: [
-          [{ icon: "vertical_align_top", label: t("上揃え"), todo: 1 }, { icon: "vertical_align_center", label: t("上下中央揃え"), todo: 1 }, { icon: "vertical_align_bottom", label: t("下揃え"), todo: 1 }],
-          [{ icon: "format_align_left", label: t("左揃え"), todo: 1 }, { icon: "format_align_center", label: t("中央揃え"), todo: 1 }, { icon: "format_align_right", label: t("右揃え"), todo: 1 }]
-        ] }] },
-        { label: t("数値"), items: [{ rows: [
-          [{ chip: t("標準"), w: 120, todo: 1 }],
-          [{ icon: "currency_yen", label: t("通貨表示形式"), cmd: "yen" }, { icon: "percent", label: t("パーセント"), todo: 1 }, { icon: "decimal_increase", label: t("小数点以下の表示桁数を増やす"), todo: 1 }]
-        ] }] },
-        { label: t("編集"), items: [{ big: 1, icon: "functions", label: t("オート SUM"), cmd: "fn:SUM" }, { stack: [{ icon: "sort", label: t("並べ替え"), todo: 1 }, { icon: "filter_alt", label: t("フィルター"), todo: 1 }, { icon: "search", label: t("検索"), todo: 1 }] }] }
-      ] },
-      { tab: t("挿入"), groups: [
-        { label: t("テーブル"), items: [{ big: 1, icon: "table", label: t("テーブル"), todo: 1 }] },
-        { label: t("グラフ"), items: [{ big: 1, icon: "bar_chart", label: t("縦棒"), todo: 1 }, { big: 1, icon: "show_chart", label: t("折れ線"), todo: 1 }, { big: 1, icon: "pie_chart", label: t("円"), todo: 1 }] }
-      ] },
-      { tab: t("数式"), groups: [
-        { label: t("関数ライブラリ"), items: [{ big: 1, icon: "functions", label: t("オート SUM"), cmd: "fn:SUM" },
-          { stack: [{ icon: "avg_pace", label: t("平均"), cmd: "fn:AVERAGE" }, { icon: "arrow_upward", label: t("最大値"), cmd: "fn:MAX" }, { icon: "arrow_downward", label: t("最小値"), cmd: "fn:MIN" }] },
-          { stack: [{ icon: "tag", label: t("数値の個数"), cmd: "fn:COUNT" }] }] }
-      ] },
-      { tab: t("データ"), groups: [
-        { label: t("並べ替えとフィルター"), items: [{ big: 1, icon: "sort_by_alpha", label: t("並べ替え"), todo: 1 }, { big: 1, icon: "filter_alt", label: t("フィルター"), todo: 1 }] }
-      ] },
-      { tab: t("表示"), groups: [ZOOM] }
-    ],
-    slide: [
-      { tab: t("ホーム"), groups: [CLIP,
-        { label: t("スライド"), items: [{ big: 1, icon: "add_box", label: t("新しいスライド"), cmd: "add" },
-          { stack: [{ icon: "dashboard", label: t("レイアウト"), cmd: "layout" }, { icon: "content_copy", label: t("複製"), cmd: "dup" }, { icon: "delete", label: t("削除"), cmd: "del" }] }] },
-        { label: t("フォント"), items: [{ rows: [
-          [{ chip: "M PLUS 1", w: 132, todo: 1 }, { chip: "28", w: 56, todo: 1 }],
-          [{ icon: "format_bold", label: t("太字"), todo: 1 }, { icon: "format_italic", label: t("斜体"), todo: 1 }, { icon: "format_underlined", label: t("下線"), todo: 1 }, { icon: "format_color_text", label: t("フォントの色"), todo: 1 }]
-        ] }] },
-        { label: t("図形描画"), items: [{ big: 1, icon: "category", label: t("図形"), todo: 1 }, { big: 1, icon: "palette", label: t("クイック スタイル"), todo: 1 }] }
-      ] },
-      { tab: t("挿入"), groups: [
-        { label: t("スライド"), items: [{ big: 1, icon: "add_box", label: t("新しいスライド"), cmd: "add" }] },
-        { label: t("画像"), items: [{ big: 1, icon: "image", label: t("画像"), todo: 1 }] },
-        { label: t("図"), items: [{ big: 1, icon: "category", label: t("図形"), todo: 1 }, { big: 1, icon: "bar_chart", label: t("グラフ"), todo: 1 }] },
-        { label: t("テキスト"), items: [{ big: 1, icon: "text_fields", label: t("テキスト ボックス"), todo: 1 }] }
-      ] },
-      { tab: t("デザイン"), groups: [
-        { label: t("テーマ"), items: [{ big: 1, icon: "palette", label: t("テーマ"), todo: 1 }, { big: 1, icon: "aspect_ratio", label: t("スライドのサイズ"), todo: 1 }] }
-      ] },
-      { tab: t("スライド ショー"), groups: [
-        { label: t("スライド ショーの開始"), items: [{ big: 1, icon: "play_arrow", label: t("最初から"), cmd: "present:0" }, { big: 1, icon: "slideshow", label: t("このスライドから"), cmd: "present:cur" }] }
-      ] },
-      { tab: t("表示"), groups: [ZOOM] }
-    ]
-  };
+  //                  { rows: [[{ icon, label } か { chip, w, key }]] } … アイコンだけのボタンの行 / { styles: [{ tag, label }] } … スタイルの一覧（Doc）
+  //   cmd があれば動く（App.command(cmd, 押したボタン)）。todo: 1 は「まだ使えません」。drop: 1 は下向きの矢印（メニューが出る）
+  //   toggle: "名前" は、App.state() の その名前が true のときにオンに見せる。chip の key: "名前" は、App.state() の値を文字として出す
   var ribbonTab = 0, ribbonOpen = true, zoom = 100;
 
-  function btnAttrs(x) { return x.todo ? ' data-todo="' + esc(x.label || x.chip) + '"' : ' data-cmd="' + esc(x.cmd) + '"' + (x.toggle ? ' data-toggle="' + x.toggle + '" aria-pressed="false"' : ""); }
+  function btnAttrs(x) {
+    return x.todo ? ' data-todo="' + esc(x.label || x.chip) + '"' : ' data-cmd="' + esc(x.cmd) + '"' + (x.toggle ? ' data-toggle="' + x.toggle + '" aria-pressed="false"' : "") + (x.key ? ' data-chip="' + x.key + '"' : "");
+  }
   function ribbonItem(x) {
-    if (x.big) return '<button type="button" class="rb-big m3-state"' + btnAttrs(x) + ">" + icon(x.icon) + "<span>" + esc(x.label) + "</span></button>";
-    if (x.stack) return '<div class="rb-stack">' + x.stack.map(function (s) { return '<button type="button" class="rb-small m3-state"' + btnAttrs(s) + ">" + icon(s.icon) + "<span>" + esc(s.label) + "</span></button>"; }).join("") + "</div>";
+    var drop = x.drop ? '<span class="msr rb-drop" aria-hidden="true">arrow_drop_down</span>' : "";
+    if (x.big) return '<button type="button" class="rb-big m3-state"' + btnAttrs(x) + ">" + icon(x.icon) + "<span>" + esc(x.label) + drop + "</span></button>";
+    if (x.stack) return '<div class="rb-stack">' + x.stack.map(function (s) { return '<button type="button" class="rb-small m3-state"' + btnAttrs(s) + ">" + icon(s.icon) + "<span>" + esc(s.label) + "</span>" + (s.drop ? '<span class="msr rb-drop" aria-hidden="true">arrow_drop_down</span>' : "") + "</button>"; }).join("") + "</div>";
     if (x.rows) return '<div class="rb-rows">' + x.rows.map(function (row) {
       return '<div class="rb-row">' + row.map(function (b) {
-        if (b.chip) return '<button type="button" class="rb-chip m3-state" style="width:' + b.w + 'px"' + btnAttrs(b) + "><span>" + esc(b.chip) + "</span>" + icon("arrow_drop_down") + "</button>";
-        return '<button type="button" class="rb-icon m3-state"' + btnAttrs(b) + ' aria-label="' + esc(b.label) + '" title="' + esc(b.label) + '">' + icon(b.icon) + "</button>";
+        if (b.chip) return '<button type="button" class="rb-chip m3-state" style="width:' + b.w + 'px" title="' + esc(b.label || b.chip) + '"' + btnAttrs(b) + "><span>" + esc(b.chip) + "</span>" + icon("arrow_drop_down") + "</button>";
+        return '<button type="button" class="rb-icon m3-state' + (b.drop ? " rb-icon--drop" : "") + '"' + btnAttrs(b) + ' aria-label="' + esc(b.label) + '" title="' + esc(b.label + (b.sub ? "（" + b.sub + "）" : "")) + '">' + icon(b.icon) + (b.drop ? '<span class="msr rb-drop" aria-hidden="true">arrow_drop_down</span>' : "") + "</button>";
       }).join("") + "</div>";
     }).join("") + "</div>";
     if (x.styles) return '<div class="rb-styles">' + x.styles.map(function (s) {
-      return '<button type="button" class="rb-style rb-style--' + s.tag + ' m3-state" data-cmd="fmt:' + s.tag + '"><span class="rb-style__sample">' + esc(t("あア亜Aa")) + "</span><span>" + esc(s.label) + "</span></button>";
+      return '<button type="button" class="rb-style rb-style--' + s.tag + ' m3-state" data-cmd="fmt:' + s.tag + '" data-toggle="fmt:' + s.tag + '"><span class="rb-style__sample">' + esc(t("あア亜Aa")) + "</span><span>" + esc(s.label) + "</span></button>";
     }).join("") + "</div>";
     return "";
   }
   // prevTab: 切りかえる前のタブ（中身を右・左のどちらから入れるかを決める）
+  function ribbonTabs() { return App.ribbon.filter(function (tb) { return !tb.when || tb.when(); }); }
   function renderRibbon(prevTab) {
-    var tabs = RIBBON[APP], row = $("rtabs");
-    // タブの行は最初に 1 回だけ作り、あとは選んでいるタブと、折りたたみのボタンだけ変える（作り直すと、押したボタンが消えて下線もずれる）
-    if (!row.firstChild) {
+    var tabs = ribbonTabs(), row = $("rtabs");
+    if (ribbonTab >= tabs.length) ribbonTab = 0;
+    // タブの行は、タブが同じあいだは作り直さない（作り直すと、押したボタンが消えて下線もずれる）
+    var sig = tabs.map(function (tb) { return tb.tab; }).join("|");
+    if (row.getAttribute("data-sig") !== sig) {
+      row.setAttribute("data-sig", sig);
       row.innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + esc(t("ファイル")) + "</button>" +
-        tabs.map(function (tb, i) { return '<button type="button" class="rtab m3-state" role="tab" aria-selected="false" data-rtab="' + i + '"><span>' + esc(tb.tab) + "</span></button>"; }).join("") +
+        tabs.map(function (tb, i) { return '<button type="button" class="rtab m3-state' + (tb.ctx ? " rtab--ctx" : "") + '" role="tab" aria-selected="false" data-rtab="' + i + '"><span>' + esc(tb.tab) + "</span></button>"; }).join("") +
         '<span class="rtabs__space"></span><button type="button" class="icon-btn m3-state rtabs__fold" data-fold></button>' +
         '<span class="rtabs__ind" id="rtabs-ind" aria-hidden="true"></span>';
     }
@@ -581,7 +872,7 @@
     body.innerHTML = tabs[ribbonTab].groups.map(function (g) {
       return '<div class="rgroup" role="group" aria-label="' + esc(g.label) + '"><div class="rgroup__items">' + g.items.map(ribbonItem).join("") + '</div><div class="rgroup__label">' + esc(g.label) + "</div></div>";
     }).join("");
-    syncToggles();
+    syncRibbon();
     placeIndicator();
   }
   // 選んだタブの下線を、いまの場所から滑らせて動かす（Office と同じ。下線は 1 本だけで、CSS の transition で動く）。
@@ -599,53 +890,83 @@
     ind.style.width = r.width + "px";
   }
   window.addEventListener("resize", function () { placeIndicator(false); });
-  function syncToggles() {
-    if (APP !== "doc") return;
-    var page = $("page");
-    var inside = page && document.activeElement === page;
-    document.querySelectorAll("[data-toggle]").forEach(function (b) {
-      var on = false;
-      try { on = inside && document.queryCommandState(b.getAttribute("data-toggle")); } catch (e) { /* 使えないときはオフ */ }
-      b.setAttribute("aria-pressed", String(!!on));
+  // 選んでいるところに合わせて、リボンのボタンのオン・オフと、フォント名などの文字を変える。
+  // 図形を選んだときの「図形の書式」のような、出たり消えたりするタブ（when）も、ここで出し入れする
+  var syncTimer = null;
+  function syncRibbon() {
+    if (!App || !current || !$("rbody")) return;
+    var sig = ribbonTabs().map(function (tb) { return tb.tab; }).join("|");
+    if ($("rtabs").getAttribute("data-sig") !== sig) {
+      var tabs = ribbonTabs(), ctx = -1;
+      tabs.forEach(function (tb, i) { if (tb.ctx) ctx = i; });
+      var was = App.ribbon.filter(function (tb) { return tb.ctx; }).some(function (tb) { return $("rtabs").getAttribute("data-sig").split("|").indexOf(tb.tab) >= 0; });
+      if (ctx >= 0 && !was) ribbonTab = ctx;
+      if (ribbonTab >= tabs.length) ribbonTab = 0;
+      renderRibbon();
+      return;
+    }
+    var st = App.state ? App.state() : {};
+    st.read = readMode;
+    st.painter = st.painter || false;
+    document.querySelectorAll("#editor [data-toggle]").forEach(function (b) { b.setAttribute("aria-pressed", String(!!st[b.getAttribute("data-toggle")])); });
+    document.querySelectorAll("#editor [data-chip]").forEach(function (b) {
+      var v = st[b.getAttribute("data-chip")];
+      if (v !== undefined && v !== null) b.firstChild.textContent = v;
     });
   }
-  document.addEventListener("selectionchange", function () { if (current && APP === "doc") syncToggles(); });
+  function syncSoon() { clearTimeout(syncTimer); syncTimer = setTimeout(syncRibbon, 60); }
+  O.syncSoon = syncSoon;
+  document.addEventListener("selectionchange", function () { if (current) syncSoon(); });
 
   function buildEditor() {
     var a = APPS[APP], ed = $("editor");
-    if (!a || !ed) return;
+    if (!a || !ed || !App) return;
     ed.innerHTML =
       '<header class="titlebar">' +
         '<button type="button" class="tbar-logo" data-file aria-label="' + esc(t("ファイル")) + '" title="' + esc(t("ファイル")) + '">' + icon(a.icon, true) + "</button>" +
         '<div class="qat" role="toolbar" aria-label="' + esc(t("クイック アクセス")) + '">' +
-          '<button type="button" class="icon-btn m3-state" data-cmd="save" aria-label="' + esc(t("保存")) + '" title="' + esc(t("保存")) + '">' + icon("save") + "</button>" +
-          '<button type="button" class="icon-btn m3-state" data-cmd="undo" aria-label="' + esc(t("元に戻す")) + '" title="' + esc(t("元に戻す")) + '">' + icon("undo") + "</button>" +
-          '<button type="button" class="icon-btn m3-state" data-cmd="redo" aria-label="' + esc(t("やり直し")) + '" title="' + esc(t("やり直し")) + '">' + icon("redo") + "</button>" +
+          '<button type="button" class="icon-btn m3-state" data-cmd="save" aria-label="' + esc(t("保存")) + '" title="' + esc(t("保存（Ctrl+S）")) + '">' + icon("save") + "</button>" +
+          '<button type="button" class="icon-btn m3-state" data-cmd="undo" aria-label="' + esc(t("元に戻す")) + '" title="' + esc(t("元に戻す（Ctrl+Z）")) + '">' + icon("undo") + "</button>" +
+          '<button type="button" class="icon-btn m3-state" data-cmd="redo" aria-label="' + esc(t("やり直し")) + '" title="' + esc(t("やり直し（Ctrl+Y）")) + '">' + icon("redo") + "</button>" +
         "</div>" +
         '<button type="button" class="tbar-name m3-state" id="title-btn" title="' + esc(t("名前を変更")) + '"><span class="tbar-name__text" id="title-text" data-i18n-skip></span><span class="tbar-name__state" id="status"></span>' + icon("expand_more") + "</button>" +
-        '<button type="button" class="tbar-search m3-state" data-todo="' + esc(t("検索")) + '">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
+        '<button type="button" class="tbar-search m3-state" data-cmd="find">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
         '<span class="titlebar__space"></span>' +
-        '<button type="button" class="icon-btn m3-state hide-sm" data-todo="' + esc(t("コメント")) + '" aria-label="' + esc(t("コメント")) + '" title="' + esc(t("コメント")) + '">' + icon("comment") + "</button>" +
+        '<button type="button" class="icon-btn m3-state hide-sm" ' + (App.comments ? 'data-cmd="comments"' : 'data-todo="' + esc(t("コメント")) + '"') + ' aria-label="' + esc(t("コメント")) + '" title="' + esc(t("コメント")) + '">' + icon("comment") + "</button>" +
         '<button type="button" class="m3-btn m3-btn--tonal m3-state tbar-share" data-todo="' + esc(t("共有")) + '">' + icon("share") + '<span class="hide-sm">' + esc(t("共有")) + "</span></button>" +
         '<button type="button" class="tbar-avatar" data-avatar-btn data-avatar aria-label="' + esc(t("アカウント")) + '" title="' + esc(t("アカウント")) + '"></button>' +
       "</header>" +
       '<div class="ribbon"><div class="rtabs" id="rtabs" role="tablist" aria-label="' + esc(t("リボン")) + '"></div><div class="rbody" id="rbody" role="toolbar"></div></div>' +
+      '<div class="findbar" id="findbar" hidden>' + icon("search") +
+        '<input id="find-q" type="search" placeholder="' + esc(t("検索")) + '" autocomplete="off" aria-label="' + esc(t("検索する文字")) + '">' +
+        '<input id="find-r" type="search" placeholder="' + esc(t("置換後の文字")) + '" autocomplete="off" aria-label="' + esc(t("置換後の文字")) + '">' +
+        '<label class="findbar__opt"><input type="checkbox" id="find-case">' + esc(t("大文字と小文字を区別")) + "</label>" +
+        '<span class="findbar__info" id="find-info"></span>' +
+        '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-cmd="findPrev" aria-label="' + esc(t("前へ")) + '">' + icon("keyboard_arrow_up") + "</button>" +
+        '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-cmd="findNext">' + esc(t("次へ")) + "</button>" +
+        '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-cmd="replaceOne">' + esc(t("置換")) + "</button>" +
+        '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-cmd="replaceAll">' + esc(t("すべて置換")) + "</button>" +
+        '<button type="button" class="icon-btn m3-state" data-cmd="findClose" aria-label="' + esc(t("閉じる")) + '">' + icon("close") + "</button></div>" +
       '<div class="canvas" id="canvas" data-i18n-skip></div>' +
       '<footer class="statusbar"><span class="statusbar__info" id="stat"></span>' +
         '<span class="statusbar__space"></span>' +
         '<span class="views hide-sm">' +
-          '<button type="button" class="sb-btn m3-state" data-todo="' + esc(t("閲覧モード")) + '" aria-label="' + esc(t("閲覧モード")) + '" title="' + esc(t("閲覧モード")) + '">' + icon("menu_book") + "</button>" +
-          '<button type="button" class="sb-btn is-on m3-state" aria-label="' + esc(t("標準")) + '" title="' + esc(t("標準")) + '">' + icon(APP === "sheet" ? "grid_on" : APP === "slide" ? "view_sidebar" : "article") + "</button>" +
+          '<button type="button" class="sb-btn m3-state" data-cmd="read" data-toggle="read" aria-label="' + esc(t("閲覧モード")) + '" title="' + esc(t("閲覧モード")) + '">' + icon("menu_book") + "</button>" +
+          '<button type="button" class="sb-btn is-on m3-state" data-cmd="normalView" aria-label="' + esc(t("標準")) + '" title="' + esc(t("標準")) + '">' + icon(APP === "sheet" ? "grid_on" : APP === "slide" ? "view_sidebar" : "article") + "</button>" +
+          (APP === "slide" ? '<button type="button" class="sb-btn m3-state" data-cmd="present:cur" aria-label="' + esc(t("スライド ショー")) + '" title="' + esc(t("スライド ショー（F5）")) + '">' + icon("slideshow") + "</button>" : "") +
         "</span>" +
         '<span class="zoom"><button type="button" class="sb-btn m3-state" data-cmd="zoomOut" aria-label="' + esc(t("縮小")) + '">' + icon("remove") + "</button>" +
-        '<input type="range" id="zoom" min="50" max="200" step="10" value="100" aria-label="' + esc(t("ズーム")) + '">' +
+        '<input type="range" id="zoom" min="25" max="300" step="5" value="100" aria-label="' + esc(t("ズーム")) + '">' +
         '<button type="button" class="sb-btn m3-state" data-cmd="zoomIn" aria-label="' + esc(t("拡大")) + '">' + icon("add") + "</button>" +
         '<button type="button" class="sb-zoom m3-state" data-cmd="zoom" id="zoom-v">100%</button></span>' +
       "</footer>";
     $("title-btn").addEventListener("click", renameCurrent);
     $("zoom").addEventListener("input", function (e) { setZoom(+e.target.value); });
+    $("find-q").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); findNext(e.shiftKey ? -1 : 1); } else if (e.key === "Escape") closeFind(); });
+    $("find-r").addEventListener("keydown", function (e) { if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); replaceOne(); } else if (e.key === "Escape") closeFind(); });
+    $("find-q").addEventListener("input", function () { $("find-info").textContent = ""; });
     // 文書の中の選んだところが外れないよう、リボンとクイック アクセスを押したときにフォーカスを動かさない
-    ed.addEventListener("mousedown", function (e) { if (APP === "doc" && e.target.closest(".ribbon [data-cmd], .qat [data-cmd]")) e.preventDefault(); });
+    ed.addEventListener("mousedown", function (e) { if (e.target.closest(".ribbon button, .qat button, .statusbar button")) e.preventDefault(); });
     renderRibbon();
   }
   function setTitle() {
@@ -654,15 +975,18 @@
   }
   function setStatus(s) { var el = $("status"); if (el) el.textContent = s ? " ・ " + s : ""; }
   // 保存（自動保存がオンなら、変えてから少しして保存。オフなら、保存のボタンか Ctrl+S で保存）
-  var saveTimer = null, dirty = false;
+  var saveTimer = null, dirty = false, lastVersion = 0;
   function saveNow() {
     clearTimeout(saveTimer); saveTimer = null;
     if (!current) return Promise.resolve(false);
     var f = current;
+    if (App && App.beforeSave) App.beforeSave();
     dirty = false;
     setStatus(t("保存しています…"));
     return Store.save(f).then(function () {
       if (current === f && !dirty) setStatus(t("保存済み"));
+      // 10 分ごとに、版の履歴に残す
+      if (Date.now() - lastVersion > 600000) { lastVersion = Date.now(); Store.addVersion(f.id, f.data); }
       return true;
     }, function (e) { dirty = true; setStatus(t("保存できませんでした")); failed(e); return false; });
   }
@@ -673,7 +997,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveNow, 600);
   }
-  function flush() { if (saveTimer && current) saveNow(); }
+  function flush() { if (hist.timer) record(); if (saveTimer && current) saveNow(); }
   window.addEventListener("pagehide", flush);
   // 保存していない変更があるときは、閉じる前に確かめる
   window.addEventListener("beforeunload", function (e) { if (current && (dirty || saveTimer)) { flush(); e.preventDefault(); e.returnValue = ""; } });
@@ -686,11 +1010,15 @@
         history.replaceState(null, "", "#f=" + encodeURIComponent(f.id));
         setTitle();
         setStatus(t("保存済み"));
+        if ($("home") && !$("home").hidden && view === "info") renderStart();
       });
     });
   }
   function closeFile() {
+    var f = current;
     (dirty ? saveNow() : Promise.resolve()).then(function () {
+      if (f) Store.addVersion(f.id, f.data);
+      if (App && App.close) App.close();
       current = null; dirty = false;
       history.pushState(null, "", location.pathname);
       route();
@@ -698,368 +1026,154 @@
   }
 
   function setZoom(z) {
-    zoom = Math.max(50, Math.min(200, Math.round(z / 10) * 10));
+    zoom = Math.max(25, Math.min(300, Math.round(z / 5) * 5));
     var r = $("zoom"); if (r) r.value = zoom;
     var v = $("zoom-v"); if (v) v.textContent = zoom + "%";
-    var target = document.querySelector("#page, #grid-scroll .grid, #stage");
-    if (target) target.style.zoom = zoom / 100;
+    if (App && App.zoom) App.zoom(zoom / 100);
   }
 
-  var COMMANDS = {}, RENDER = {};
-  function runCmd(cmd) {
-    if (!current) return;
+  // ---------- 検索と置換（中身はアプリの App.find・App.replace） ----------
+  function openFind(replace) {
+    var bar = $("findbar"); if (!bar) return;
+    bar.hidden = false;
+    var sel = App.selectedText ? App.selectedText() : "";
+    if (sel && sel.length < 100 && sel.indexOf("\n") < 0) $("find-q").value = sel;
+    var input = replace && $("find-q").value ? $("find-r") : $("find-q");
+    input.focus(); input.select();
+  }
+  function closeFind() { var bar = $("findbar"); if (bar) bar.hidden = true; if (App.findClose) App.findClose(); }
+  function findOpts() { return { q: ($("find-q").value || ""), r: $("find-r").value || "", matchCase: $("find-case").checked }; }
+  function findNext(dir) {
+    var o = findOpts();
+    if (!o.q) return openFind();
+    var res = App.find(o.q, dir || 1, o);
+    $("find-info").textContent = res === false ? t("見つかりませんでした") : typeof res === "string" ? res : "";
+  }
+  function replaceOne() {
+    var o = findOpts();
+    if (!o.q) return openFind(true);
+    var n = App.replace(o.q, o.r, false, o);
+    if (n) changed();
+    findNext(1);
+  }
+  function replaceAll() {
+    var o = findOpts();
+    if (!o.q) return openFind(true);
+    var n = App.replace(o.q, o.r, true, o);
+    if (n) changed();
+    $("find-info").textContent = t("{n} か所を置きかえました", { n: n || 0 });
+  }
+
+  // ---------- 印刷（PDF もここから。アプリが App.beforePrint で印刷用のものを用意する） ----------
+  var printStyle = null;
+  function beforePrint() {
+    if (!current || !App) return;
+    flush();
+    root.classList.add("is-printing");
+    var css = App.beforePrint ? App.beforePrint() : "";
+    if (css) { printStyle = document.createElement("style"); printStyle.textContent = css; document.head.appendChild(printStyle); }
+  }
+  function afterPrint() {
+    root.classList.remove("is-printing");
+    if (printStyle) { printStyle.remove(); printStyle = null; }
+    if (App && App.afterPrint) App.afterPrint();
+  }
+  window.addEventListener("beforeprint", beforePrint);
+  window.addEventListener("afterprint", afterPrint);
+  function doPrint() { if ($("editor").hidden) backToEditor(); window.print(); }
+
+  function showKeys() {
+    var list = [["Ctrl+S", t("保存")], ["Ctrl+Z", t("元に戻す")], ["Ctrl+Y", t("やり直し")], ["Ctrl+C / X / V", t("コピー・切り取り・貼り付け")],
+      ["Ctrl+F", t("検索")], ["Ctrl+H", t("置換")], ["Ctrl+P", t("印刷")]].concat(App && App.keys ? App.keys : []).concat([["Esc", t("閉じる")]]);
+    var body = document.createElement("dl");
+    body.className = "keys-list";
+    body.innerHTML = list.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("");
+    M3.dialog({ title: t("キーボードショートカット"), icon: "keyboard", body: body, actions: [{ label: t("閉じる"), value: null, primary: true }] });
+  }
+
+  function runCmd(cmd, el) {
+    if (!current && cmd !== "keys" && cmd !== "find") return;
     if (cmd === "save") {
       saveNow().then(function (ok) {
-        if (ok) notify(Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
+        if (!ok) return;
+        lastVersion = Date.now();
+        Store.addVersion(current.id, current.data);
+        notify(current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
       });
       return;
     }
+    if (cmd === "undo") { if (App.beforeUndo) App.beforeUndo(); return restore(-1); }
+    if (cmd === "redo") { if (App.beforeUndo) App.beforeUndo(); return restore(1); }
+    if (cmd === "copy" || cmd === "cut" || cmd === "paste") { if (App.clip) App.clip(cmd); return; }
+    if (cmd === "find") {
+      if (!current || ($("editor") && $("editor").hidden)) { var fs = $("file-search"); if (fs) fs.focus(); return; }
+      return openFind();
+    }
+    if (cmd === "replace") return openFind(true);
+    if (cmd === "findNext") return findNext(1);
+    if (cmd === "findPrev") return findNext(-1);
+    if (cmd === "findClose") return closeFind();
+    if (cmd === "replaceOne") return replaceOne();
+    if (cmd === "replaceAll") return replaceAll();
+    if (cmd === "print") return doPrint();
+    if (cmd === "keys") return showKeys();
+    if (cmd === "read") {
+      readMode = !readMode;
+      root.classList.toggle("is-read", readMode);
+      if (App.setRead) App.setRead(readMode);
+      syncRibbon();
+      notify(readMode ? t("閲覧モードにしました") : t("編集モードにしました"));
+      return;
+    }
+    if (cmd === "normalView") { if (readMode) runCmd("read"); return; }
     if (cmd === "zoomIn") return setZoom(zoom + 10);
     if (cmd === "zoomOut") return setZoom(zoom - 10);
     if (cmd === "zoom100") return setZoom(100);
     if (cmd === "zoom") {
-      M3.choose({ title: t("ズーム"), value: String(zoom), options: ["200", "150", "125", "100", "75", "50"].map(function (z) { return { value: z, label: z + "%" }; }) })
-        .then(function (v) { if (v) setZoom(+v); });
+      var opts = ["300", "200", "150", "125", "100", "75", "50"].map(function (z) { return { value: z, label: z + "%", checked: +z === zoom }; });
+      if (App.fitZoom) opts.push({ sep: 1 }, { value: "fit", label: t("ウィンドウに合わせる"), icon: "fit_screen" });
+      menu(el && el.id !== "zoom-v" ? el : $("zoom-v"), opts).then(function (v) { if (v === "fit") setZoom(App.fitZoom() * 100); else if (v) setZoom(+v); });
       return;
     }
-    COMMANDS[APP](cmd);
+    App.command(cmd, el);
   }
 
+  var readMode = false;
   function openEditor(f) {
     current = f;
+    readMode = false;
+    root.classList.remove("is-read");
+    if (App.upgrade) App.upgrade(f.data);
     setTitle();
     setStatus(t("保存済み"));
-    RENDER[APP]();
-    setZoom(zoom);
+    closeFind();
+    if (App.open) App.open();
+    App.render({});
+    resetHist();
+    setZoom(App.defaultZoom ? App.defaultZoom() * 100 : zoom);
+    ribbonTab = 0;
+    renderRibbon();
     placeIndicator(false);
-  }
-
-  // ---------- Doc ----------
-  RENDER.doc = function () {
-    $("canvas").innerHTML = '<div class="doc-scroll"><article class="doc-page" id="page" contenteditable="true" spellcheck="false" aria-label="' + esc(t("文書の本文")) + '"></article></div>';
-    var page = $("page");
-    page.innerHTML = current.data.html || "<p><br></p>";
-    page.addEventListener("input", function () { current.data.html = page.innerHTML; docStat(); saveSoon(); });
-    page.addEventListener("focus", syncToggles);
-    page.addEventListener("blur", syncToggles);
-    docStat();
-  };
-  function docStat() {
-    var page = $("page"), n = page.textContent.replace(/\s/g, "").length;
-    var pages = Math.max(1, Math.ceil(page.scrollHeight / 1056));
-    $("stat").innerHTML = "<span>" + esc(t("{n} / {m} ページ", { n: 1, m: pages })) + "</span><span>" + esc(t("{n} 文字", { n: n })) + "</span><span class=\"hide-sm\">" + esc(t("日本語")) + "</span>";
-  }
-  COMMANDS.doc = function (cmd) {
-    var page = $("page");
-    if (document.activeElement !== page) page.focus();
-    if (cmd.indexOf("fmt:") === 0) document.execCommand("formatBlock", false, cmd.slice(4));
-    else if (cmd === "table") document.execCommand("insertHTML", false, "<table><tbody>" + [0, 1, 2].map(function () { return "<tr><td><br></td><td><br></td><td><br></td></tr>"; }).join("") + "</tbody></table><p><br></p>");
-    else if (cmd === "hr") document.execCommand("insertHorizontalRule");
-    else if (cmd === "date") { var d = new Date(); document.execCommand("insertText", false, t("{y}年{m}月{d}日", { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() })); }
-    else if (cmd === "count") { notify(t("{n} 文字（空白を除く）", { n: page.textContent.replace(/\s/g, "").length })); return; }
-    else if (cmd === "link") {
-      var sel = getSelection(), range = sel.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
-      M3.prompt({ title: t("リンク"), label: t("アドレス（URL）"), placeholder: "https://", ok: t("挿入") }).then(function (url) {
-        url = (url || "").trim();
-        if (!url) return;
-        if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-        page.focus();
-        if (range) { sel.removeAllRanges(); sel.addRange(range); }
-        if (range && !range.collapsed) document.execCommand("createLink", false, url);
-        else document.execCommand("insertHTML", false, '<a href="' + esc(url) + '">' + esc(url) + "</a>");
-        current.data.html = page.innerHTML; saveSoon();
-      });
-      return;
-    }
-    else document.execCommand(cmd, false, null);
-    current.data.html = page.innerHTML;
-    docStat();
-    syncToggles();
-    saveSoon();
-  };
-
-  // ---------- Sheet ----------
-  var COLS = "ABCDEFGHIJKL".split("");
-  var sel = "A1";
-  function cellsOf(d) { return d.cells || (d.cells = {}); }
-  function num(v) {
-    if (typeof v === "number") return v;
-    var n = parseFloat(String(v).replace(/[¥,\s]/g, ""));
-    return isNaN(n) ? null : n;
-  }
-  function value(d, ref, depth) {
-    var raw = cellsOf(d)[ref];
-    if (raw === undefined || raw === "") return "";
-    if (raw.charAt(0) !== "=") { var n = num(raw); return n !== null && /^[¥\d,.\s-]+$/.test(raw) ? n : raw; }
-    if ((depth || 0) > 20) return "#エラー";
-    return formula(d, raw.slice(1).trim().toUpperCase(), (depth || 0) + 1);
-  }
-  function operand(d, s, depth) {
-    if (/^[A-L]\d+$/.test(s)) { var v = num(value(d, s, depth)); return v === null ? 0 : v; }
-    return parseFloat(s);
-  }
-  function formula(d, f, depth) {
-    var m = f.match(/^(SUM|AVERAGE|MAX|MIN|COUNT)\(([A-L])(\d+):([A-L])(\d+)\)$/);
-    if (m) {
-      var vals = [];
-      for (var c = Math.min(COLS.indexOf(m[2]), COLS.indexOf(m[4])); c <= Math.max(COLS.indexOf(m[2]), COLS.indexOf(m[4])); c++) {
-        for (var r = Math.min(+m[3], +m[5]); r <= Math.max(+m[3], +m[5]); r++) {
-          var v = num(value(d, COLS[c] + r, depth));
-          if (v !== null) vals.push(v);
-        }
-      }
-      if (m[1] === "COUNT") return vals.length;
-      if (!vals.length) return 0;
-      if (m[1] === "SUM") return vals.reduce(function (a, b) { return a + b; }, 0);
-      if (m[1] === "AVERAGE") return vals.reduce(function (a, b) { return a + b; }, 0) / vals.length;
-      return Math[m[1].toLowerCase()].apply(null, vals);
-    }
-    m = f.match(/^([A-L]\d+|\d+(?:\.\d+)?)\s*([-+*/])\s*([A-L]\d+|\d+(?:\.\d+)?)$/);
-    if (m) {
-      var a = operand(d, m[1], depth), b = operand(d, m[3], depth);
-      if (m[2] === "+") return a + b;
-      if (m[2] === "-") return a - b;
-      if (m[2] === "*") return a * b;
-      return b === 0 ? "#エラー" : a / b;
-    }
-    if (/^[A-L]\d+$/.test(f)) return value(d, f, depth);
-    return "#エラー";
-  }
-  function shown(d, ref) {
-    var v = value(d, ref);
-    if (typeof v !== "number") return { text: String(v), n: false, v: null };
-    var yen = (d.fmt || {})[ref.charAt(0)] === "yen";
-    return { text: (yen ? "¥" : "") + (Math.round(v * 100) / 100).toLocaleString("ja-JP"), n: true, v: v };
-  }
-  function sheetTable(d, rows, cols, full) {
-    var h = '<table class="grid">' + (full ? '<thead><tr><th class="corner"></th>' + COLS.slice(0, cols).map(function (c) { return '<th data-col="' + c + '">' + c + "</th>"; }).join("") + "</tr></thead>" : "") + "<tbody>";
-    for (var r = 1; r <= rows; r++) {
-      var cls = r === d.head ? "head" : r === d.total ? "total" : "";
-      h += '<tr class="' + cls + '">' + (full ? '<th data-row="' + r + '">' + r + "</th>" : "");
-      for (var c = 0; c < cols; c++) {
-        var ref = COLS[c] + r, s = shown(d, ref);
-        h += '<td data-ref="' + ref + '"' + (s.n ? ' class="n"' : "") + ">" + esc(s.text) + "</td>";
-      }
-      h += "</tr>";
-    }
-    return h + "</tbody></table>";
-  }
-  RENDER.sheet = function () {
-    var d = current.data, rows = 50;
-    Object.keys(cellsOf(d)).forEach(function (k) { rows = Math.max(rows, +k.slice(1) + 20); });
-    $("canvas").innerHTML =
-      '<div class="sheet">' +
-        '<div class="fx-bar"><span class="namebox" id="namebox">A1</span>' +
-          '<span class="fx-btns hide-sm"><span class="msr" aria-hidden="true">close</span><span class="msr" aria-hidden="true">check</span></span>' +
-          '<span class="fx-ico">fx</span>' +
-          '<input class="fx-input" id="fx" autocomplete="off" spellcheck="false" aria-label="' + esc(t("数式バー")) + '"></div>' +
-        '<div class="grid-scroll" id="grid-scroll" tabindex="0" aria-label="' + esc(t("ワークシート")) + '">' + sheetTable(d, rows, COLS.length, true) + "</div>" +
-        '<div class="sheet-tabs"><span class="sheet-tabs__nav hide-sm"><span class="msr" aria-hidden="true">chevron_left</span><span class="msr" aria-hidden="true">chevron_right</span></span>' +
-          '<button type="button" class="stab is-on m3-state">' + esc(t("Sheet1")) + "</button>" +
-          '<button type="button" class="icon-btn m3-state" data-todo="' + esc(t("新しいシート")) + '" aria-label="' + esc(t("新しいシート")) + '" title="' + esc(t("新しいシート")) + '">' + icon("add_circle") + "</button></div>" +
-      "</div>";
-    var gridEl = $("grid-scroll"), fx = $("fx");
-    gridEl.addEventListener("click", function (e) { var td = e.target.closest("td[data-ref]"); if (td) select(td.getAttribute("data-ref")); });
-    gridEl.addEventListener("dblclick", function () { fx.focus(); fx.select(); });
-    gridEl.addEventListener("keydown", function (e) {
-      var c = COLS.indexOf(sel.charAt(0)), r = +sel.slice(1);
-      var moves = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0], Enter: [0, 1], Tab: [1, 0] };
-      if (moves[e.key]) {
-        e.preventDefault();
-        select(COLS[Math.max(0, Math.min(COLS.length - 1, c + moves[e.key][0]))] + Math.max(1, r + moves[e.key][1]));
-      } else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); commit(sel, ""); }
-      else if (e.key === "F2") { e.preventDefault(); fx.focus(); }
-      else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); fx.value = e.key; fx.focus(); }
-    });
-    fx.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); commit(sel, fx.value); select(sel.charAt(0) + (+sel.slice(1) + 1)); gridEl.focus({ preventScroll: true }); }
-      if (e.key === "Escape") { fx.value = cellsOf(current.data)[sel] || ""; gridEl.focus({ preventScroll: true }); }
-    });
-    fx.addEventListener("change", function () { commit(sel, fx.value); });
-    select("A1");
-    gridEl.focus({ preventScroll: true });
-  };
-  function select(ref) {
-    var gridEl = $("grid-scroll");
-    if (!gridEl) return;
-    var td = gridEl.querySelector('[data-ref="' + ref + '"]');
-    if (!td) return;
-    gridEl.querySelectorAll(".sel, .hl").forEach(function (x) { x.classList.remove("sel", "hl"); });
-    sel = ref;
-    td.classList.add("sel");
-    var colH = gridEl.querySelector('[data-col="' + ref.charAt(0) + '"]'), rowH = gridEl.querySelector('[data-row="' + ref.slice(1) + '"]');
-    if (colH) colH.classList.add("hl");
-    if (rowH) rowH.classList.add("hl");
-    td.scrollIntoView({ block: "nearest", inline: "nearest" });
-    $("namebox").textContent = ref;
-    $("fx").value = cellsOf(current.data)[ref] || "";
-    var v = shown(current.data, ref);
-    $("stat").innerHTML = "<span>" + esc(t("準備完了")) + "</span>" + (v.n ? "<span>" + esc(t("合計: {v}", { v: v.text })) + "</span>" : "");
-  }
-  function refreshCells() {
-    $("grid-scroll").querySelectorAll("td[data-ref]").forEach(function (td) {
-      var s = shown(current.data, td.getAttribute("data-ref"));
-      td.textContent = s.text;
-      td.classList.toggle("n", s.n);
-    });
-  }
-  function commit(ref, raw) {
-    var cells = cellsOf(current.data);
-    if ((cells[ref] || "") === raw) return;
-    if (raw === "") delete cells[ref]; else cells[ref] = raw;
-    refreshCells();
-    saveSoon();
-  }
-  COMMANDS.sheet = function (cmd) {
-    var d = current.data, col = sel.charAt(0);
-    if (cmd === "undo" || cmd === "redo") { notify(t("「{name}」は、まだ使えません", { name: cmd === "undo" ? t("元に戻す") : t("やり直し") })); return; }
-    if (cmd === "yen") {
-      d.fmt = d.fmt || {};
-      if (d.fmt[col] === "yen") delete d.fmt[col]; else d.fmt[col] = "yen";
-      refreshCells();
-      select(sel);
-      saveSoon();
-      notify(d.fmt[col] ? t("{col} 列を円で表示します", { col: col }) : t("{col} 列の円の表示をやめました", { col: col }));
-    }
-    if (cmd.indexOf("fn:") === 0) {
-      // 選んだセルの上に続いている数を、その関数で計算する（Excel のオート SUM と同じ）
-      var r = +sel.slice(1), top = r - 1;
-      while (top >= 1 && num(value(d, col + top)) !== null) top--;
-      if (top === r - 1) { notify(t("上に数が入ったセルがありません")); return; }
-      commit(sel, "=" + cmd.slice(3) + "(" + col + (top + 1) + ":" + col + (r - 1) + ")");
-      select(sel);
-    }
-  };
-
-  // ---------- Slide ----------
-  var cur = 0;
-  function slideHtml(s, editable) {
-    var ce = editable ? ' contenteditable="true" spellcheck="false"' : "";
-    if (s.layout === "blank") return '<div class="sl sl--title"><div class="sl-in"></div></div>';
-    var h = '<div class="sl sl--' + (s.layout || "title") + '"><i class="sl-blob" aria-hidden="true"></i><div class="sl-in">';
-    h += '<h2 class="sl-title" data-k="title"' + ce + ">" + esc(s.title || "") + "</h2>";
-    if (s.layout === "bullets") {
-      h += '<ul class="sl-list">' + (s.items && s.items.length ? s.items : [""]).map(function (it, i) { return '<li data-k="items.' + i + '"' + ce + ">" + esc(it) + "</li>"; }).join("") + "</ul>";
-    } else {
-      h += '<p class="sl-sub" data-k="sub"' + ce + ">" + esc(s.sub || "") + "</p>";
-    }
-    return h + "</div></div>";
-  }
-  RENDER.slide = function () {
-    $("canvas").innerHTML = '<div class="deck"><div class="deck-thumbs" id="thumbs" role="listbox" aria-label="' + esc(t("スライド")) + '"></div>' +
-      '<div class="deck-stage"><div class="deck-slide" id="stage"></div>' +
-      '<div class="deck-notes" data-todo="' + esc(t("ノート")) + '">' + esc(t("クリックしてノートを追加")) + "</div></div></div>";
-    cur = 0;
-    drawThumbs();
-    drawStage();
-    $("thumbs").addEventListener("click", function (e) {
-      var b = e.target.closest("[data-slide]");
-      if (b) { cur = +b.getAttribute("data-slide"); drawThumbs(); drawStage(); }
-    });
-    var stage = $("stage");
-    stage.addEventListener("input", function (e) {
-      var k = e.target.getAttribute && e.target.getAttribute("data-k");
-      if (!k) return;
-      var s = current.data.slides[cur];
-      if (k.indexOf("items.") === 0) { s.items = s.items || []; s.items[+k.slice(6)] = e.target.textContent; }
-      else s[k] = e.target.textContent;
-      drawThumbs(true);
-      saveSoon();
-    });
-    // 箇条書き: Enter で次の行を足す・空の行で Backspace で消す
-    stage.addEventListener("keydown", function (e) {
-      var k = e.target.getAttribute && e.target.getAttribute("data-k");
-      if (!k) return;
-      var s = current.data.slides[cur];
-      if (k.indexOf("items.") === 0) {
-        var i = +k.slice(6);
-        if (e.key === "Enter") { e.preventDefault(); s.items.splice(i + 1, 0, ""); drawStage(i + 1); saveSoon(); }
-        else if (e.key === "Backspace" && !e.target.textContent && s.items.length > 1) { e.preventDefault(); s.items.splice(i, 1); drawStage(Math.max(0, i - 1)); drawThumbs(); saveSoon(); }
-      } else if (e.key === "Enter") { e.preventDefault(); }
-    });
-  };
-  function drawThumbs(keepScroll) {
-    var slides = current.data.slides;
-    $("thumbs").innerHTML = slides.map(function (s, i) {
-      return '<button type="button" class="deck-thumb" role="option" aria-selected="' + (i === cur) + '" data-slide="' + i + '"><span class="deck-no">' + (i + 1) + '</span><span class="th th--slide">' + slideHtml(s, false) + "</span></button>";
-    }).join("");
-    $("stat").innerHTML = "<span>" + esc(t("スライド {i}/{n}", { i: cur + 1, n: slides.length })) + '</span><span class="hide-sm">' + esc(t("日本語")) + "</span>";
-    if (!keepScroll) { var on = $("thumbs").querySelector('[aria-selected="true"]'); if (on) on.scrollIntoView({ block: "nearest", inline: "nearest" }); }
-  }
-  function drawStage(focusItem) {
-    $("stage").innerHTML = slideHtml(current.data.slides[cur], true);
-    if (focusItem !== undefined) {
-      var li = $("stage").querySelector('[data-k="items.' + focusItem + '"]');
-      if (li) { li.focus(); var r = document.createRange(); r.selectNodeContents(li); r.collapse(false); var s = getSelection(); s.removeAllRanges(); s.addRange(r); }
-    }
-  }
-  COMMANDS.slide = function (cmd) {
-    var slides = current.data.slides;
-    if (cmd === "undo" || cmd === "redo") { notify(t("「{name}」は、まだ使えません", { name: cmd === "undo" ? t("元に戻す") : t("やり直し") })); return; }
-    if (cmd.indexOf("present:") === 0) { present(cmd === "present:0" ? 0 : cur); return; }
-    if (cmd === "add") { slides.splice(cur + 1, 0, { layout: "bullets", title: t("タイトルを入力"), items: [t("テキストを入力")] }); cur++; }
-    if (cmd === "dup") { slides.splice(cur + 1, 0, copy(slides[cur])); cur++; }
-    if (cmd === "del") {
-      if (slides.length < 2) { notify(t("スライドが 1 枚のときは削除できません")); return; }
-      M3.confirm({ title: t("このスライドを削除しますか？"), text: t("スライド {i} を削除します。", { i: cur + 1 }), ok: t("削除"), danger: true, icon: "delete" }).then(function (ok) {
-        if (!ok) return;
-        slides.splice(cur, 1); cur = Math.min(cur, slides.length - 1);
-        drawThumbs(); drawStage(); saveSoon();
-      });
-      return;
-    }
-    if (cmd === "layout") {
-      M3.choose({ title: t("レイアウト"), value: slides[cur].layout, options: [
-        { value: "title", label: t("タイトル スライド"), icon: "title" }, { value: "bullets", label: t("タイトルとコンテンツ"), icon: "format_list_bulleted" }, { value: "section", label: t("セクション見出し"), icon: "splitscreen" }
-      ] }).then(function (v) {
-        if (!v) return;
-        var s = slides[cur];
-        s.layout = v;
-        if (v === "bullets" && !(s.items && s.items.length)) s.items = [s.sub || t("テキストを入力")];
-        drawThumbs(); drawStage(); saveSoon();
-      });
-      return;
-    }
-    drawThumbs(); drawStage(); saveSoon();
-  };
-  // スライド ショー（画面いっぱいに出す。← → で前後、Esc で終わる）
-  function present(start) {
-    flush();
-    var slides = current.data.slides, i = start;
-    var box = document.createElement("div");
-    box.className = "present";
-    box.setAttribute("role", "dialog");
-    box.setAttribute("aria-label", t("スライド ショー"));
-    box.innerHTML = '<div class="present__slide" id="present-slide"></div><div class="present__bar"><span id="present-no"></span><span>' + esc(t("← → で移動・Esc で終わる")) + "</span></div>";
-    document.body.appendChild(box);
-    function draw() { $("present-slide").innerHTML = slideHtml(slides[i], false); $("present-no").textContent = (i + 1) + " / " + slides.length; }
-    function go(n) { if (n >= slides.length || n < 0) { if (n >= slides.length) end(); return; } i = n; draw(); }
-    function end() {
-      document.removeEventListener("keydown", onKey, true);
-      if (document.fullscreenElement) document.exitFullscreen().catch(function () {});
-      box.remove();
-    }
-    function onKey(e) {
-      if (e.key === "Escape") { e.preventDefault(); end(); }
-      else if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown" || e.key === "Enter") { e.preventDefault(); go(i + 1); }
-      else if (e.key === "ArrowLeft" || e.key === "PageUp" || e.key === "Backspace") { e.preventDefault(); go(i - 1); }
-    }
-    box.addEventListener("click", function () { go(i + 1); });
-    document.addEventListener("keydown", onKey, true);
-    if (box.requestFullscreen) box.requestFullscreen().catch(function () {});
-    document.addEventListener("fullscreenchange", function fs() { if (!document.fullscreenElement && box.isConnected) { document.removeEventListener("fullscreenchange", fs); end(); } });
-    draw();
+    // 開いたときの版を、版の履歴に残す
+    lastVersion = Date.now();
+    Store.addVersion(f.id, f.data);
   }
 
   // ================================================================
   //   クリック・入力・キー
   // ================================================================
+  function backToEditor() {
+    var ed = $("editor");
+    ed.classList.remove("is-back"); show("editor"); void ed.offsetWidth; ed.classList.add("is-back");
+    placeIndicator(false);
+    if (App && App.focus) App.focus();
+  }
   document.addEventListener("click", function (e) {
     var el;
     if ((el = e.target.closest("[data-todo]"))) return notify(t("「{name}」は、まだ使えません", { name: el.getAttribute("data-todo") }));
     if ((el = e.target.closest("[data-tpl]"))) return createFrom(el.getAttribute("data-tpl"));
     if ((el = e.target.closest("[data-open]"))) return openFile(el.getAttribute("data-open"), el.getAttribute("data-open-app"));
-    if ((el = e.target.closest("[data-more]"))) return fileActions(el.getAttribute("data-more"), el.getAttribute("data-name"));
+    if ((el = e.target.closest("[data-more]"))) return fileActions(el.getAttribute("data-more"), el.getAttribute("data-name"), el);
     if ((el = e.target.closest("[data-pin]"))) {
       var pid = el.getAttribute("data-pin"), on = !isPinned(pid);
       setPinned(pid, on);
@@ -1084,6 +1198,15 @@
       if (current) Store.exportFile(current).then(function (ok) { if (ok) notify(t("コピーを保存しました")); }).catch(failed);
       return;
     }
+    if (e.target.closest("[data-print]")) { backToEditor(); setTimeout(doPrint, 300); return; }
+    if ((el = e.target.closest("[data-export]"))) return exportAs(el.getAttribute("data-export"));
+    if ((el = e.target.closest("[data-restore]"))) return restoreVersion(+el.getAttribute("data-restore"));
+    if (e.target.closest("[data-keep-version]")) {
+      flush();
+      Store.addVersion(current.id, current.data).then(function (ok) { notify(ok ? t("いまの版を残しました") : t("いまの版は、もう残っています")); renderVersions(); });
+      return;
+    }
+    if (e.target.closest("[data-rename]")) return renameCurrent();
     if (e.target.closest("[data-close-file]")) return closeFile();
     if (e.target.closest("[data-install]")) {
       if (installEvt) { installEvt.prompt(); installEvt.userChoice.then(function () { installEvt = null; renderStart(); }); }
@@ -1101,16 +1224,11 @@
       return;
     }
     if ((el = e.target.closest("#cat-chips .chip"))) return filterTemplates(el.getAttribute("data-cat"));
-    if (e.target.closest("[data-back-edit]")) {
-      var ed = $("editor");
-      ed.classList.remove("is-back"); show("editor"); void ed.offsetWidth; ed.classList.add("is-back");
-      placeIndicator(false);
-      return;
-    }
+    if (e.target.closest("[data-back-edit]")) return backToEditor();
     if (e.target.closest("[data-file]")) { flush(); view = "home"; renderStart(); $("home").classList.add("is-backstage"); show("home"); return; }
     if ((el = e.target.closest("[data-rtab]"))) { var prev = ribbonTab; ribbonTab = +el.getAttribute("data-rtab"); ribbonOpen = true; renderRibbon(prev); return; }
     if (e.target.closest("[data-fold]")) { ribbonOpen = !ribbonOpen; renderRibbon(); return; }
-    if ((el = e.target.closest("[data-cmd]"))) return runCmd(el.getAttribute("data-cmd"));
+    if ((el = e.target.closest("[data-cmd]"))) return runCmd(el.getAttribute("data-cmd"), el);
   });
   document.addEventListener("input", function (e) {
     if (e.target.id === "file-search") { query = e.target.value.trim(); renderFileTable(); }
@@ -1123,10 +1241,21 @@
     if (id === "opt-autosave") { settings.autosave = e.target.checked; saveSettings(); if (settings.autosave && dirty) saveNow(); notify(settings.autosave ? t("自動保存をオンにしました") : t("自動保存をオフにしました")); }
   });
   document.addEventListener("keydown", function (e) {
-    if (!current || !$("editor") || $("editor").hidden) return;
-    var k = e.key.toLowerCase();
-    if ((e.ctrlKey || e.metaKey) && k === "s") { e.preventDefault(); runCmd("save"); }
-    if (APP === "slide" && e.key === "F5") { e.preventDefault(); present(e.shiftKey ? cur : 0); }
+    if (!current || !$("editor") || $("editor").hidden || document.querySelector(".tbs-dialog-scrim, .present")) return;
+    var k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
+    // 文字の欄（数式バー・検索など）の中の Ctrl+Z などは、その欄のものを使う（data-office-keys の付いた欄は、アプリのもの）
+    var field = e.target.matches && e.target.matches("input, textarea, select") && !e.target.hasAttribute("data-office-keys");
+    if (mod && k === "s") { e.preventDefault(); runCmd("save"); return; }
+    if (mod && k === "p") { e.preventDefault(); doPrint(); return; }
+    if (mod && !e.shiftKey && k === "f") { e.preventDefault(); openFind(); return; }
+    if (mod && k === "h") { e.preventDefault(); openFind(true); return; }
+    if (!field && mod && !e.altKey && (k === "z" || k === "y")) {
+      e.preventDefault();
+      runCmd(k === "y" || e.shiftKey ? "redo" : "undo");
+      return;
+    }
+    if (e.key === "Escape" && !$("findbar").hidden && e.target.closest && e.target.closest("#findbar")) { closeFind(); return; }
+    if (App.key) App.key(e, field);
   });
 
   // ================================================================
@@ -1134,6 +1263,7 @@
   // ================================================================
   function show(v) {
     ["home", "editor"].forEach(function (id) { var el = $(id); if (el) el.hidden = id !== v; });
+    closeMenu();
   }
   function showStart() {
     current = null; dirty = false;
@@ -1146,7 +1276,7 @@
     flush();
     var m = location.hash.match(/^#f=(.+)$/);
     var id = m && APPS[APP] ? decodeURIComponent(m[1]) : null;
-    if (!id || !$("editor")) { showStart(); return Promise.resolve(); }
+    if (!id || !$("editor") || !App) { showStart(); return Promise.resolve(); }
     // フォルダの許可がまだのときは、スタート画面で「許可する」を押してもらう（押したら、このファイルを開く）
     if (Store.supported && Store.state() !== "ready" && !Store.isOutside(id)) { showStart(); return Promise.resolve(); }
     return Store.get(id).then(function (f) {
@@ -1164,11 +1294,15 @@
   window.addEventListener("storage", function (e) {
     if (e.key === SET_KEY) { try { var d = JSON.parse(e.newValue || "{}"); Object.keys(settings).forEach(function (k) { if (k in d) settings[k] = d[k]; }); } catch (x) { /* そのまま */ } applySettings(); }
     if ((e.key === "sk_office_files" || e.key === SET_KEY) && $("home") && !$("home").hidden) renderFileTable();
+    // 同じ場所（手元・sk-hub.jp）のほかのタブで、ログイン・ログアウトしたとき
+    if (e.key === "skhub_account") { fillAvatars(); if ($("home") && !$("home").hidden && view === "account") renderStart(); }
   });
 
   applySettings();
   buildEditor();
   fillAvatars();
+  // office.sk-hub.jp: 開いたときに、sk-hub.jp のログインの状態を受け取る
+  if (bridge) setTimeout(function () { syncAccount(); }, 600);
   Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); });
   // オフラインでも開けるように（/office/sw.js）
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {

@@ -4,10 +4,11 @@
 //   ・フォント（Google Fonts）: 取っておいたものをすぐ使い、後ろで新しいものに入れかえる
 //   ・置く場所は Office のいちばん上（office.sk-hub.jp/sw.js・手元では /office/sw.js）。scope も同じ
 //   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
-const VERSION = "sk-office-v4";
+const VERSION = "sk-office-v6";
 const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
 const SHELL = ["", "doc/", "sheet/", "slide/", "manifest.json",
   "shared/office.css", "shared/office.js", "shared/store.js", "shared/templates.js",
+  "shared/doc.js", "shared/sheet.js", "shared/slide.js", "shared/formula.js", "shared/chart.js", "shared/zip.js",
   "icons/icon.svg", "icons/icon-192.png"].map((p) => BASE + p)
   .concat(["/toolbox/shared/m3.css", "/toolbox/shared/m3.js", "/assets/i18n.js", "/assets/fonts.js", "/assets/coming-soon.js", "/assets/maintenance.js"]);
 const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
