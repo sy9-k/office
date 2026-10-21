@@ -4,7 +4,7 @@
 //   ・フォント（Google Fonts）: 取っておいたものをすぐ使い、後ろで新しいものに入れかえる
 //   ・置く場所は Office のいちばん上（office.sk-hub.jp/sw.js・手元では /office/sw.js）。scope も同じ
 //   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
-const VERSION = "sk-office-v3";
+const VERSION = "sk-office-v4";
 const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
 const SHELL = ["", "doc/", "sheet/", "slide/", "manifest.json",
   "shared/office.css", "shared/office.js", "shared/store.js", "shared/templates.js",
@@ -36,7 +36,11 @@ self.addEventListener("fetch", (e) => {
     e.respondWith((async () => {
       const cache = await caches.open(VERSION);
       try {
-        const res = await Promise.race([fetch(req), new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 3000))]);
+        // cache: "no-cache" … ブラウザの取っておき（HTTP キャッシュ）を使わず、変わったかをいつも聞く（変わっていなければ 304 で軽い）
+        const fresh = page ? fetch(req.url, { cache: "no-cache", credentials: "same-origin" }) : fetch(req, { cache: "no-cache" });
+        const res = await Promise.race([fresh, new Promise((_, rej) => setTimeout(() => rej(new Error("slow")), 3000))]);
+        // ページが移った（/office/doc → /office/doc/ など）ときは、ブラウザにも移ってもらう
+        if (page && res.redirected) return Response.redirect(res.url, 302);
         if (res.ok) cache.put(key, res.clone());
         return res;
       } catch (err) {

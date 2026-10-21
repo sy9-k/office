@@ -161,8 +161,12 @@
   function railBtn(attr, ic, label) {
     return '<button type="button" class="rail__item" ' + attr + '><span class="rail__pill">' + icon(ic) + "</span><span>" + esc(label) + "</span></button>";
   }
+  var animateFiles = false;
   function renderStart() {
     var a = APPS[APP];
+    // 「ファイル」で開いたときの滑りこみは 1 回だけ（ほかの画面に移ったら、ふつうの出方にもどす）
+    if ($("home")) $("home").classList.remove("is-backstage");
+    animateFiles = true;
     var rail = '<nav class="rail" aria-label="' + esc(t("メニュー")) + '">' +
       (current ? railBtn("data-back-edit", "arrow_back", t("戻る")) : "") +
       '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + icon(a ? a.icon : "apps", true) + "</span><span>" + (a ? a.name : "Office") + "</span></a>" +
@@ -339,6 +343,9 @@
         : query ? t("「{q}」に合うファイルはありません", { q: query })
         : view === "home" && fileTab === "pinned" ? t("ピン留めしたファイルはありません。ファイルの右のピンを押すと、ここに出ます。")
         : APPS[APP] ? t("まだファイルがありません。上のテンプレートを選ぶと、新しく作れます。") : t("まだファイルがありません。上のアプリから作れます。");
+      // 画面を開いたときだけ、1 つずつずらして出す（検索の文字を打つたびには動かさない）
+      box.classList.toggle("is-anim", animateFiles);
+      animateFiles = false;
       box.innerHTML = list.map(function (f) {
         var a = APPS[f.app], pin = isPinned(f.id);
         return '<div class="frow" role="row" data-app="' + f.app + '">' +
@@ -548,18 +555,50 @@
     }).join("") + "</div>";
     return "";
   }
-  function renderRibbon() {
-    var tabs = RIBBON[APP];
-    $("rtabs").innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + esc(t("ファイル")) + "</button>" +
-      tabs.map(function (tb, i) { return '<button type="button" class="rtab m3-state" role="tab" aria-selected="' + (i === ribbonTab) + '" data-rtab="' + i + '"><span>' + esc(tb.tab) + "</span></button>"; }).join("") +
-      '<span class="rtabs__space"></span><button type="button" class="icon-btn m3-state rtabs__fold" data-fold aria-expanded="' + ribbonOpen + '" aria-label="' + esc(ribbonOpen ? t("リボンを折りたたむ") : t("リボンを表示")) + '" title="' + esc(ribbonOpen ? t("リボンを折りたたむ") : t("リボンを表示")) + '">' + icon(ribbonOpen ? "keyboard_arrow_up" : "keyboard_arrow_down") + "</button>";
+  // prevTab: 切りかえる前のタブ（中身を右・左のどちらから入れるかを決める）
+  function renderRibbon(prevTab) {
+    var tabs = RIBBON[APP], row = $("rtabs");
+    // タブの行は最初に 1 回だけ作り、あとは選んでいるタブと、折りたたみのボタンだけ変える（作り直すと、押したボタンが消えて下線もずれる）
+    if (!row.firstChild) {
+      row.innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + esc(t("ファイル")) + "</button>" +
+        tabs.map(function (tb, i) { return '<button type="button" class="rtab m3-state" role="tab" aria-selected="false" data-rtab="' + i + '"><span>' + esc(tb.tab) + "</span></button>"; }).join("") +
+        '<span class="rtabs__space"></span><button type="button" class="icon-btn m3-state rtabs__fold" data-fold></button>' +
+        '<span class="rtabs__ind" id="rtabs-ind" aria-hidden="true"></span>';
+    }
+    row.querySelectorAll("[data-rtab]").forEach(function (b) { b.setAttribute("aria-selected", String(+b.getAttribute("data-rtab") === ribbonTab)); });
+    var fold = row.querySelector("[data-fold]"), foldLabel = ribbonOpen ? t("リボンを折りたたむ") : t("リボンを表示");
+    fold.setAttribute("aria-expanded", String(ribbonOpen));
+    fold.setAttribute("aria-label", foldLabel);
+    fold.title = foldLabel;
+    fold.innerHTML = icon(ribbonOpen ? "keyboard_arrow_up" : "keyboard_arrow_down");
     var body = $("rbody");
+    var opening = body.hidden && ribbonOpen;
     body.hidden = !ribbonOpen;
+    body.classList.remove("is-from-right", "is-from-left", "is-open");
+    void body.offsetWidth;
+    if (prevTab !== undefined && prevTab !== ribbonTab) body.classList.add(ribbonTab > prevTab ? "is-from-right" : "is-from-left");
+    else if (opening) body.classList.add("is-open");
     body.innerHTML = tabs[ribbonTab].groups.map(function (g) {
       return '<div class="rgroup" role="group" aria-label="' + esc(g.label) + '"><div class="rgroup__items">' + g.items.map(ribbonItem).join("") + '</div><div class="rgroup__label">' + esc(g.label) + "</div></div>";
     }).join("");
     syncToggles();
+    placeIndicator();
   }
+  // 選んだタブの下線を、いまの場所から滑らせて動かす（Office と同じ。下線は 1 本だけで、CSS の transition で動く）。
+  // animate: false のときは、すぐその場所に置く（開いたとき・画面の大きさが変わったとき）
+  function placeIndicator(animate) {
+    var ind = $("rtabs-ind"), tab = document.querySelector('.rtab[aria-selected="true"] > span'), box = $("rtabs");
+    if (!ind || !tab || !box) return;
+    var r = tab.getBoundingClientRect(), b = box.getBoundingClientRect();
+    if (!r.width) return;
+    if (animate === false || !ind.style.width) {
+      ind.style.transition = "none";
+      requestAnimationFrame(function () { requestAnimationFrame(function () { ind.style.transition = ""; }); });
+    }
+    ind.style.transform = "translateX(" + (r.left - b.left + box.scrollLeft) + "px)";
+    ind.style.width = r.width + "px";
+  }
+  window.addEventListener("resize", function () { placeIndicator(false); });
   function syncToggles() {
     if (APP !== "doc") return;
     var page = $("page");
@@ -692,6 +731,7 @@
     setStatus(t("保存済み"));
     RENDER[APP]();
     setZoom(zoom);
+    placeIndicator(false);
   }
 
   // ---------- Doc ----------
@@ -1052,11 +1092,23 @@
     if ((el = e.target.closest("[data-theme-set]"))) { settings.theme = el.getAttribute("data-theme-set"); saveSettings(); applySettings(); renderStart(); return; }
     if (e.target.closest("[data-avatar-btn]")) { flush(); view = "account"; renderStart(); show("home"); return; }
     if ((el = e.target.closest("[data-view]"))) { view = el.getAttribute("data-view"); query = ""; renderStart(); var m = $("start-main"); if (m) m.scrollTop = 0; return; }
-    if ((el = e.target.closest("[data-ftab]"))) { fileTab = el.getAttribute("data-ftab"); renderStart(); return; }
+    if ((el = e.target.closest("[data-ftab]"))) {
+      // スタート画面全体は作り直さず、タブの印とファイルの一覧だけ変える
+      fileTab = el.getAttribute("data-ftab");
+      el.parentElement.querySelectorAll("[data-ftab]").forEach(function (b) { b.setAttribute("aria-selected", String(b === el)); });
+      animateFiles = true;
+      renderFileTable();
+      return;
+    }
     if ((el = e.target.closest("#cat-chips .chip"))) return filterTemplates(el.getAttribute("data-cat"));
-    if (e.target.closest("[data-back-edit]")) { show("editor"); return; }
-    if (e.target.closest("[data-file]")) { flush(); view = "home"; renderStart(); show("home"); return; }
-    if ((el = e.target.closest("[data-rtab]"))) { ribbonTab = +el.getAttribute("data-rtab"); ribbonOpen = true; renderRibbon(); return; }
+    if (e.target.closest("[data-back-edit]")) {
+      var ed = $("editor");
+      ed.classList.remove("is-back"); show("editor"); void ed.offsetWidth; ed.classList.add("is-back");
+      placeIndicator(false);
+      return;
+    }
+    if (e.target.closest("[data-file]")) { flush(); view = "home"; renderStart(); $("home").classList.add("is-backstage"); show("home"); return; }
+    if ((el = e.target.closest("[data-rtab]"))) { var prev = ribbonTab; ribbonTab = +el.getAttribute("data-rtab"); ribbonOpen = true; renderRibbon(prev); return; }
     if (e.target.closest("[data-fold]")) { ribbonOpen = !ribbonOpen; renderRibbon(); return; }
     if ((el = e.target.closest("[data-cmd]"))) return runCmd(el.getAttribute("data-cmd"));
   });

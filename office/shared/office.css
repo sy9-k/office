@@ -10,6 +10,9 @@
   --ease: cubic-bezier(.2, 0, 0, 1);
   --ease-in: cubic-bezier(.05, .7, .1, 1);
   --ease-sk: cubic-bezier(.34, 1.4, .64, 1); /* SK: 選んだときの弾み */
+  /* Microsoft Office（Fluent Design）と同じ動きのカーブ。入ってくるとき・出ていくとき */
+  --fl-in: cubic-bezier(.1, .9, .2, 1);
+  --fl-out: cubic-bezier(.9, .1, 1, .2);
   /* ファイルの一覧のアイコンの色（アプリごと。テーマで変えない） */
   --doc-c: #2563eb; --sheet-c: #16a34a; --slide-c: #ea580c;
   color-scheme: light;
@@ -122,26 +125,42 @@ h1, h2, h3, p { margin: 0; }
 .splash {
   position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; overflow: hidden;
   background: var(--md-primary-container); color: var(--md-on-primary-container);
-  transition: opacity .35s linear, transform .42s var(--ease);
+  transition: opacity .25s linear;
 }
-.splash.is-done { opacity: 0; transform: scale(1.04); pointer-events: none; }
+.splash.is-done { opacity: 0; pointer-events: none; }
 .splash__in { display: grid; justify-items: center; gap: 12px; position: relative; }
 /* 3 枚の紙が重なって出てくる（後ろから Slide・Sheet・Doc の色） */
 .splash__papers { position: relative; width: 112px; height: 96px; margin-bottom: 16px; }
-.splash__papers i { position: absolute; width: 64px; height: 80px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); animation: sp-paper .7s var(--ease-in) backwards; }
+.splash__papers { animation: sp-logo .5s var(--fl-in) backwards; }
+.splash__papers i { position: absolute; width: 64px; height: 80px; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(0, 0, 0, .18); animation: sp-paper .6s var(--fl-in) backwards; }
 .splash__papers i::before { content: ""; position: absolute; left: 12px; right: 12px; top: 14px; height: 6px; border-radius: 3px; background: var(--c); box-shadow: 0 14px 0 -1px color-mix(in srgb, var(--c) 40%, transparent), 0 26px 0 -1px color-mix(in srgb, var(--c) 40%, transparent); }
 .splash__papers i:nth-child(1) { --c: #ea580c; left: 44px; top: 0; rotate: 10deg; animation-delay: .05s; }
 .splash__papers i:nth-child(2) { --c: #16a34a; left: 24px; top: 8px; rotate: -4deg; animation-delay: .15s; }
 .splash__papers i:nth-child(3) { --c: #2563eb; left: 6px; top: 16px; rotate: -12deg; animation-delay: .25s; }
 :root[data-app="doc"] .splash__papers i:nth-child(3), :root[data-app="sheet"] .splash__papers i:nth-child(2), :root[data-app="slide"] .splash__papers i:nth-child(1) { z-index: 1; scale: 1.08; }
-@keyframes sp-paper { from { opacity: 0; transform: translateY(24px) scale(.9); } }
-.splash__name { font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -.02em; animation: sp-up .6s var(--ease-in) .2s backwards; }
-.splash__sub { font-size: 14px; font-weight: 500; letter-spacing: .04em; opacity: .85; animation: sp-up .6s var(--ease-in) .3s backwards; }
-.splash__bar { width: 120px; height: 4px; margin-top: 20px; border-radius: 2px; overflow: hidden; background: color-mix(in srgb, currentColor 25%, transparent); }
-.splash__bar i { display: block; width: 40%; height: 100%; border-radius: 2px; background: currentColor; animation: sp-bar 1s var(--ease) infinite; }
-@keyframes sp-up { from { opacity: 0; transform: translateY(12px); } }
-@keyframes sp-bar { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
-@keyframes view-in { from { opacity: 0; transform: translateY(12px); } }
+@keyframes sp-logo { from { opacity: 0; transform: scale(.8); } }
+@keyframes sp-paper { from { transform: translateY(14px); } }
+.splash__name { font-size: 56px; font-weight: 700; line-height: 1; letter-spacing: -.02em; animation: sp-up .5s var(--fl-in) .12s backwards; }
+.splash__sub { font-size: 14px; font-weight: 500; letter-spacing: .04em; opacity: .85; animation: sp-up .5s var(--fl-in) .2s backwards; }
+@keyframes sp-up { from { opacity: 0; transform: translateY(10px); } }
+/* 読みこみ中の 5 つの点（Office の起動画面と同じ。速く入って、まん中でゆっくり、速く出ていく） */
+.splash__dots { position: relative; width: 220px; height: 6px; margin-top: 36px; overflow: hidden; }
+.splash__dots i { position: absolute; left: 0; top: 0; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0; animation: sp-dot 2.4s infinite; }
+.splash__dots i:nth-child(2) { animation-delay: .14s; }
+.splash__dots i:nth-child(3) { animation-delay: .28s; }
+.splash__dots i:nth-child(4) { animation-delay: .42s; }
+.splash__dots i:nth-child(5) { animation-delay: .56s; }
+@keyframes sp-dot {
+  0% { transform: translateX(0); opacity: 0; animation-timing-function: var(--fl-in); }
+  8% { opacity: 1; }
+  40% { transform: translateX(100px); animation-timing-function: linear; }
+  60% { transform: translateX(120px); animation-timing-function: var(--fl-out); }
+  92% { opacity: 1; }
+  100% { transform: translateX(220px); opacity: 0; }
+}
+/* 画面が入ってくるとき（下から少し上がる。Office のスタート画面と同じ） */
+@keyframes view-in { from { opacity: 0; transform: translateY(20px); } }
+@keyframes fade-in { from { opacity: 0; } }
 
 /* ================================================================
    スタート画面（左のメニュー＋中身）
@@ -171,8 +190,21 @@ h1, h2, h3, p { margin: 0; }
 .start__main {
   overflow-y: auto; display: grid; gap: 32px; align-content: start;
   padding: 32px max(24px, env(safe-area-inset-right)) 48px 40px;
-  animation: view-in .45s var(--ease-in) backwards;
+  animation: view-in .37s var(--fl-in) backwards;
 }
+/* テンプレートと、ファイルの一覧は、1 つずつ少しずらして出る */
+.tpl-row .tpl, .tpl-grid .tpl, #files.is-anim .frow { animation: view-in .37s var(--fl-in) backwards; }
+.tpl-row .tpl:nth-child(2), .tpl-grid .tpl:nth-child(2), #files.is-anim .frow:nth-child(2) { animation-delay: .03s; }
+.tpl-row .tpl:nth-child(3), .tpl-grid .tpl:nth-child(3), #files.is-anim .frow:nth-child(3) { animation-delay: .06s; }
+.tpl-row .tpl:nth-child(4), .tpl-grid .tpl:nth-child(4), #files.is-anim .frow:nth-child(4) { animation-delay: .09s; }
+.tpl-row .tpl:nth-child(5), .tpl-grid .tpl:nth-child(5), #files.is-anim .frow:nth-child(5) { animation-delay: .12s; }
+.tpl-row .tpl:nth-child(n+6), .tpl-grid .tpl:nth-child(n+6), #files.is-anim .frow:nth-child(n+6) { animation-delay: .15s; }
+.tpl:active .th { transform: scale(.97); transition-duration: .1s; }
+/* エディタの「ファイル」で開いたとき（Office のように、左のメニューが横から滑りこむ） */
+.start.is-backstage .rail { animation: bs-rail .3s var(--fl-in) backwards; }
+.start.is-backstage .start__main { animation: bs-main .37s var(--fl-in) .04s backwards; }
+@keyframes bs-rail { from { transform: translateX(-100%); } }
+@keyframes bs-main { from { opacity: 0; transform: translateX(-32px); } }
 .start__main > * { width: 100%; max-width: 1160px; }
 .start__h1 { font-size: 28px; font-weight: 400; line-height: 36px; }
 .start__h2 { font-size: 16px; font-weight: 500; line-height: 24px; }
@@ -325,7 +357,14 @@ h1, h2, h3, p { margin: 0; }
 /* ================================================================
    エディタ（タイトルバー・リボン・中身・ステータスバー）
    ================================================================ */
-.editor { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; height: 100dvh; animation: view-in .35s var(--ease-in); }
+.editor { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100%; height: 100dvh; animation: fade-in .2s linear; }
+/* ファイルを開いたとき: 紙（文書・表・スライド）が下から上がってくる */
+.editor .doc-page, .editor .grid-scroll, .editor .deck-slide { animation: page-up .45s var(--fl-in) .06s backwards; }
+.editor .deck-thumb { animation: fade-in .3s linear .12s backwards; }
+@keyframes page-up { from { opacity: 0; transform: translateY(40px); } }
+/* 「ファイル」から「戻る」で戻ったとき */
+.editor.is-back { animation: bs-back .3s var(--fl-in); }
+@keyframes bs-back { from { opacity: 0; transform: translateX(24px); } }
 .editor > * { min-width: 0; }
 /* タイトルバー（アプリの色） */
 .titlebar {
@@ -350,12 +389,22 @@ h1, h2, h3, p { margin: 0; }
 
 /* リボン（タブ＋グループ）。グループの下に名前を出す */
 .ribbon { background: var(--md-surface-container); }
-.rtabs { display: flex; align-items: center; overflow-x: auto; padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); scrollbar-width: none; }
+.rtabs { position: relative; display: flex; align-items: center; overflow-x: auto; padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); scrollbar-width: none; }
+/* 選んだタブの下線。タブを切りかえると、前のタブから滑って動く（office.js の placeIndicator） */
+.rtabs__ind { position: absolute; bottom: 0; left: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); pointer-events: none; transition: transform .3s var(--fl-in), width .3s var(--fl-in); }
+/* タブを切りかえたときの中身（右のタブなら右から、左のタブなら左から入る） */
+.rbody.is-from-right .rgroup { animation: rb-r .28s var(--fl-in) backwards; }
+.rbody.is-from-left .rgroup { animation: rb-l .28s var(--fl-in) backwards; }
+.rbody.is-open .rgroup { animation: fade-in .2s linear backwards; }
+.rbody .rgroup:nth-child(2) { animation-delay: .02s; }
+.rbody .rgroup:nth-child(3) { animation-delay: .04s; }
+.rbody .rgroup:nth-child(n+4) { animation-delay: .06s; }
+@keyframes rb-r { from { opacity: 0; transform: translateX(24px); } }
+@keyframes rb-l { from { opacity: 0; transform: translateX(-24px); } }
 .rtabs::-webkit-scrollbar { display: none; }
 .rtab { flex: none; height: 40px; padding: 0 14px; border: 0; border-radius: 0; background: none; cursor: pointer; color: var(--md-on-surface-variant); font-size: 14px; font-weight: 500; white-space: nowrap; }
 .rtab > span { position: relative; display: inline-flex; align-items: center; height: 100%; }
 .rtab[aria-selected="true"] { color: var(--md-primary); font-weight: 700; }
-.rtab[aria-selected="true"] > span::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: var(--md-primary); animation: tab-in .32s var(--ease-sk); }
 .rtab--file { margin-right: 4px; color: var(--md-primary); font-weight: 700; border-radius: 20px; height: 32px; }
 .rtabs__space { flex: 1; }
 .rtabs__fold { width: 36px; height: 36px; }
