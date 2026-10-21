@@ -503,6 +503,52 @@ h1, h2, h3, p { margin: 0; }
 .present:hover .present__bar { opacity: 1; }
 
 /* ================================================================
+   パソコンでアプリとして入れたときのタイトルバー（Window Controls Overlay）
+   office.js が <html class="is-wco"> を付ける。ウィンドウのいちばん上の帯（高さ・左右の空きは env(titlebar-area-*)）を、Office のタイトルバーにする。
+   閉じるボタンなどはブラウザが上に重ねるので、その分（Windows は右・Mac は左）をあける。何もないところをドラッグすると、ウィンドウを動かせる
+   ================================================================ */
+.wco-bar { display: none; }
+:root.is-wco {
+  --wco-h: env(titlebar-area-height, 33px);
+  --wco-l: env(titlebar-area-x, 0px);
+  --wco-r: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
+:root.is-wco .start { grid-template-rows: var(--wco-h) minmax(0, 1fr); }
+:root.is-wco .wco-bar {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; height: var(--wco-h); min-width: 0;
+  padding: 0 calc(var(--wco-r) + 8px) 0 calc(var(--wco-l) + 12px);
+  background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 13px; line-height: 1;
+  app-region: drag; -webkit-app-region: drag; user-select: none; -webkit-user-select: none;
+}
+:root.is-wco .rail { padding-top: 8px; }
+.wco-bar__logo { display: grid; place-items: center; }
+.wco-bar__logo .msr { font-size: 18px; }
+.wco-bar__name { font-weight: 700; white-space: nowrap; }
+.wco-bar__sub { opacity: .8; white-space: nowrap; }
+.wco-bar__space { flex: 1; }
+.wco-search { display: inline-flex; align-items: center; gap: 8px; width: min(360px, 34vw); height: 24px; padding: 0 12px; border: 0; border-radius: 12px; background: color-mix(in srgb, var(--md-on-primary-container) 16%, transparent); color: inherit; cursor: pointer; font-size: 12.5px; }
+.wco-search .msr { font-size: 17px; }
+/* エディタ: タイトルバーを帯の高さに詰める */
+:root.is-wco .titlebar {
+  min-height: 0; height: var(--wco-h); gap: 2px;
+  padding: 0 calc(var(--wco-r) + 8px) 0 calc(var(--wco-l) + 6px);
+  app-region: drag; -webkit-app-region: drag; user-select: none; -webkit-user-select: none;
+}
+:root.is-wco .titlebar button, :root.is-wco .titlebar a, :root.is-wco .wco-bar button, :root.is-wco .wco-bar a { app-region: no-drag; -webkit-app-region: no-drag; }
+:root.is-wco .titlebar .icon-btn { width: 30px; height: 26px; border-radius: 8px; }
+:root.is-wco .titlebar .icon-btn .msr { font-size: 19px; }
+:root.is-wco .tbar-logo { width: 26px; height: 26px; border-radius: 8px; }
+:root.is-wco .tbar-logo .msr { font-size: 18px; }
+:root.is-wco .qat { padding-right: 2px; }
+:root.is-wco .tbar-name { height: 26px; font-size: 13px; }
+:root.is-wco .tbar-search { height: 24px; font-size: 12.5px; margin-left: auto; margin-right: auto; }
+:root.is-wco .titlebar__space { display: none; }
+:root.is-wco .tbar-share { height: 26px; padding: 0 12px; margin: 0 4px; font-size: 13px; }
+:root.is-wco .tbar-share .msr { font-size: 17px; }
+:root.is-wco .tbar-avatar { width: 24px; height: 24px; font-size: 11px; box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--md-on-primary-container) 40%, transparent); }
+:root.is-wco .tbar-avatar .msr { font-size: 16px; }
+
+/* ================================================================
    せまい画面（左のメニューを上の 1 行に・リボンは横にスクロール）
    ================================================================ */
 @media (max-width: 760px) {

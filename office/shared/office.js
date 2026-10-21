@@ -61,7 +61,9 @@
     if (settings.motion === "reduce") root.setAttribute("data-motion", "reduce"); else root.removeAttribute("data-motion");
     reduced = settings.motion === "reduce" || window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     fillAvatars();
+    syncThemeColor();
   }
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () { syncThemeColor(); });
   function accountHint() { try { return JSON.parse(localStorage.getItem("skhub_account") || "null"); } catch (e) { return null; } }
   function userName() { var h = accountHint(); return (settings.user || (h && h.name) || "").trim(); }
   // アカウントのアイコン（名前の 1 文字目。名前がなければ人のアイコン）
@@ -85,6 +87,20 @@
     if (d.getFullYear() === now.getFullYear()) return t("{m}月{d}日", { m: d.getMonth() + 1, d: d.getDate() });
     return t("{y}年{m}月{d}日", { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate() });
   }
+  // ---------- パソコンでアプリとして入れたときのタイトルバー（Window Controls Overlay） ----------
+  //   manifest の display_override で、ウィンドウのいちばん上の帯をページが使う。使っているあいだは <html class="is-wco">。
+  //   エディタは、タイトルバー（アプリのアイコン・保存・ファイル名・検索・共有・アカウント）をそのまま帯にする。
+  //   スタート画面は、同じ色の帯（.wco-bar）を出す。見た目は office.css。タイトルバーの右の「∧」で、ふつうのタイトルバーに戻せる
+  var wco = navigator.windowControlsOverlay;
+  function syncWco() { root.classList.toggle("is-wco", !!(wco && wco.visible)); }
+  if (wco) { syncWco(); wco.addEventListener("geometrychange", syncWco); }
+  // ウィンドウのボタン（閉じるなど）とアドレスバーの色を、アプリの色（タイトルバーの色）にそろえる
+  function syncThemeColor() {
+    var meta = document.querySelector('meta[name="theme-color"]');
+    var c = getComputedStyle(root).getPropertyValue("--md-primary-container").trim();
+    if (meta && c) meta.setAttribute("content", c);
+  }
+
   // ---------- アプリとして入れる（PWA。/office/manifest.json・/office/sw.js） ----------
   var installEvt = null;
   var standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
@@ -161,7 +177,12 @@
       railItem("options", "settings", t("オプション")) +
       "</nav>";
     var main = view === "new" ? viewNew() : view === "open" ? viewOpen() : view === "account" ? viewAccount() : view === "options" ? viewOptions() : viewHome();
-    $("home").innerHTML = rail + '<main class="start__main" id="start-main">' + main + "</main>";
+    // アプリとして入れたときだけ見える、ウィンドウのいちばん上の帯（is-wco）
+    var bar = '<header class="wco-bar"><span class="wco-bar__logo">' + icon(a ? a.icon : "apps", true) + '</span><span class="wco-bar__name">' + (a ? a.name : "SK Hub Office") + "</span>" +
+      (a ? '<span class="wco-bar__sub">SK Hub Office</span>' : "") +
+      '<span class="wco-bar__space"></span><button type="button" class="wco-search m3-state" data-todo="' + esc(t("検索")) + '">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
+      '<span class="wco-bar__space"></span><button type="button" class="tbar-avatar" data-view="account" data-avatar aria-label="' + esc(t("アカウント")) + '" title="' + esc(t("アカウント")) + '"></button></header>';
+    $("home").innerHTML = bar + rail + '<main class="start__main" id="start-main">' + main + "</main>";
     if (view === "new") filterTemplates("all");
     if (view === "home" || view === "open") renderFileTable();
     renderLegacy();
