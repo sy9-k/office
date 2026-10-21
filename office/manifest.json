@@ -1,0 +1,30 @@
+{
+  "name": "SK Hub Office",
+  "short_name": "Office",
+  "description": "文書の Doc・表計算の Sheet・スライドの Slide。ファイルは PC のフォルダに保存します（開発中）。",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "ja",
+  "dir": "ltr",
+  "background_color": "#faf8ff",
+  "theme_color": "#2563eb",
+  "categories": ["productivity", "education"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Doc", "short_name": "Doc", "description": "文書を書く", "url": "./doc/", "icons": [{ "src": "icons/doc-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "Sheet", "short_name": "Sheet", "description": "表で計算する", "url": "./sheet/", "icons": [{ "src": "icons/sheet-96.png", "sizes": "96x96", "type": "image/png" }] },
+    { "name": "Slide", "short_name": "Slide", "description": "発表をつくる", "url": "./slide/", "icons": [{ "src": "icons/slide-96.png", "sizes": "96x96", "type": "image/png" }] }
+  ],
+  "file_handlers": [
+    { "action": "./doc/", "accept": { "application/x-sk-hub-office-doc": [".skdoc"] }, "icons": [{ "src": "icons/doc-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" },
+    { "action": "./sheet/", "accept": { "application/x-sk-hub-office-sheet": [".sksheet"] }, "icons": [{ "src": "icons/sheet-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" },
+    { "action": "./slide/", "accept": { "application/x-sk-hub-office-slide": [".skslide"] }, "icons": [{ "src": "icons/slide-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" }
+  ]
+}

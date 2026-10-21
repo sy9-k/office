@@ -8,6 +8,7 @@
 //   ・フォルダに保存できないブラウザ（Safari・Firefox・スマホなど）は、ブラウザの中（localStorage の sk_office_files）に保存する
 //       [{ id, app, name, tpl, created, updated, data }]。ファイルとして書き出す（exportFile）・読み込む（importFile）もできる
 //   ・前にブラウザの中に保存したファイルは、フォルダを選んだあとに migrate() でフォルダに移せる
+//   ・アプリとして入れたあと、エクスプローラー・Finder で .skdoc などをダブルクリックしたときは openHandle() で、そのファイルに直接保存する
 //   どれも Promise を返す（state()・folderName()・supported だけはすぐ返す）
 (function () {
   "use strict";
@@ -81,6 +82,16 @@
   // 書き込みが重ならないように、順番に行う
   var queue = Promise.resolve();
   function inOrder(fn) { var p = queue.then(fn, fn); queue = p.catch(function () {}); return p; }
+  // フォルダの外のファイル（エクスプローラー・Finder でダブルクリックして開いたもの）。ID は「@番号/ファイル名」。開いているあいだだけ覚える
+  var handles = {}, handleSeq = 0;
+  function isHandleId(id) { return id.charAt(0) === "@"; }
+  function writeHandle(h, text) {
+    var ask = typeof h.requestPermission === "function" ? h.requestPermission({ mode: "readwrite" }) : Promise.resolve("granted");
+    return ask.then(function (p) {
+      if (p !== "granted") throw new Error("no-permission");
+      return h.createWritable().then(function (w) { return w.write(text).then(function () { return w.close(); }); });
+    });
+  }
 
   var Store = {
     EXT: EXT,
@@ -130,6 +141,16 @@
       return step();
     },
     get: function (id) {
+      if (isHandleId(id)) {
+        var hd = handles[id];
+        if (!hd) return Promise.resolve(null);
+        return hd.getFile().then(function (file) {
+          return file.text().then(function (text) {
+            var o = parse(text, appOf(hd.name));
+            return { id: id, app: o.app, name: baseName(hd.name), tpl: o.tpl, created: o.created, updated: file.lastModified, data: o.data, outside: true };
+          });
+        }).catch(function () { return null; });
+      }
       if (!supported) return Promise.resolve(lsAll().filter(function (f) { return f.id === id; })[0] || null);
       if (!ready()) return Promise.resolve(null);
       return folder.getFileHandle(id).then(function (h) { return h.getFile(); }).then(function (file) {
@@ -155,6 +176,11 @@
     },
     save: function (f) {
       f.updated = Date.now();
+      if (isHandleId(f.id)) {
+        var hd = handles[f.id], body = payload(f);
+        if (!hd) return Promise.reject(new Error("closed"));
+        return inOrder(function () { return writeHandle(hd, body).then(function () { return f; }); });
+      }
       if (!supported) {
         return Promise.resolve().then(function () { var list = lsAll().filter(function (x) { return x.id !== f.id; }); list.push(f); lsSave(list); return f; });
       }
@@ -163,6 +189,7 @@
     },
     // 名前を変える（フォルダでは、新しい名前で書いて、前のファイルを消す）。f.id が変わることがある
     rename: function (f, name) {
+      if (isHandleId(f.id)) return Promise.reject(new Error("outside"));
       if (!supported) { f.name = name; return Store.save(f); }
       return inOrder(function () {
         return uniqueName(name, f.app, f.id).then(function (fileName) {
@@ -193,6 +220,21 @@
         return done;
       });
     },
+
+    // エクスプローラー・Finder でダブルクリックしたファイル（PWA の file_handlers。launchQueue で来る）を開けるようにして、ID を返す
+    //   選んだフォルダの中のファイルなら、ふつうの ID（ファイル名）。外のファイルなら「@番号/ファイル名」で、そのファイルに直接保存する
+    openHandle: function (h) {
+      var inFolder = ready() && typeof folder.resolve === "function"
+        ? folder.resolve(h).then(function (path) { return path && path.length === 1 ? path[0] : null; }, function () { return null; })
+        : Promise.resolve(null);
+      return inFolder.then(function (name) {
+        if (name) return name;
+        var id = "@" + (++handleSeq) + "/" + h.name;
+        handles[id] = h;
+        return id;
+      });
+    },
+    isOutside: isHandleId,
 
     // ほかの場所のファイル（.skdoc など）を読み込んで、保存先に入れる
     importFile: function (file) {
