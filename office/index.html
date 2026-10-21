@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ja" data-app="hub">
+<head>
+<meta charset="UTF-8">
+<!-- 開くのは office.sk-hub.jp（_workers/office/ の Worker が sk-hub.jp/office/ を中継する）。sk-hub.jp/office/ を開いたら移す（ファイルが 2 つの場所に分かれないように） -->
+<script>if(/^(www\.)?sk-hub\.jp$/.test(location.hostname))location.replace("https://office.sk-hub.jp"+location.pathname.replace(/^\/office(?=\/)/,"")+location.search+location.hash);</script>
+<script src="/assets/coming-soon.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="SK Hub Office の入り口。文書の Doc・表計算の Sheet・スライドの Slide を選んで開きます（開発中）。">
+<meta name="theme-color" content="#2563eb">
+<meta name="robots" content="noindex">
+<title>SK Hub Office</title>
+<link rel="canonical" href="https://office.sk-hub.jp/">
+<!-- 多言語: /lang/ で選んだ言語で表示する（/assets/i18n.js。office.js の最後で translatePage()） -->
+<script src="/assets/i18n.js"></script>
+<script src="/assets/fonts.js" data-fonts="https://fonts.googleapis.com/css2?family=M+PLUS+1:wght@400;500;700&display=swap" data-icons="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block"></script>
+<link rel="stylesheet" href="/toolbox/shared/m3.css">
+<link rel="stylesheet" href="shared/office.css">
+<!-- ライト・ダークと動きを減らすは、SK Hub Office のオプション（sk_office_settings）。「端末に合わせる」のときは、同じ場所に SK's Toolbox の設定（sk_toolbox）があればそろえる -->
+<script>(function(){var d=document.documentElement;try{var o=JSON.parse(localStorage.getItem("sk_office_settings")||"{}"),s=JSON.parse(localStorage.getItem("sk_toolbox")||"{}"),th=o.theme==="light"||o.theme==="dark"?o.theme:s.theme;if(th==="light"||th==="dark")d.setAttribute("data-theme",th);if(o.motion==="reduce"||s.motion==="reduce")d.setAttribute("data-motion","reduce");}catch(e){}})();</script>
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+</head>
+<body>
+  <!-- 起動画面 -->
+  <div class="splash" id="splash" aria-hidden="true">
+    <div class="splash__in">
+      <div class="splash__papers"><i></i><i></i><i></i></div>
+      <div class="splash__name">Office</div>
+      <div class="splash__sub">SK Hub Office</div>
+      <div class="splash__bar"><i></i></div>
+    </div>
+  </div>
+
+  <!-- スタート画面。中身は shared/office.js が作る -->
+  <div class="start" id="home"></div>
+
+  <div class="snackbar" id="toast" role="status" aria-live="polite"><span id="toast-text"></span></div>
+
+  <script src="/toolbox/shared/m3.js"></script>
+  <!-- ファイルの保存（PC のフォルダ・ブラウザの中） -->
+  <script src="shared/store.js"></script>
+  <script src="shared/office.js"></script>
+  <script src="/assets/maintenance.js" defer></script>
+</body>
+</html>

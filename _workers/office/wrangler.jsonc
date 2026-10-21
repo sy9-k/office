@@ -1,0 +1,12 @@
+// SK Hub Office（office.sk-hub.jp）の Worker。手順は README.md
+{
+  "name": "sk-office",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-09-01",
+  // 公開するアドレス（ゾーン sk-hub.jp が同じ Cloudflare アカウントにあること。DNS は deploy で自動で作られる）
+  "routes": [
+    { "pattern": "office.sk-hub.jp", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "observability": { "enabled": true }
+}
