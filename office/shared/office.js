@@ -149,7 +149,12 @@
     if (on) settings.pinned.push(id);
     saveSettings();
   }
-  function where() { return Store.state() === "ready" ? Store.folderName() : Store.supported ? t("フォルダ") : t("このブラウザ"); }
+  function where(f) {
+    if (f && f.place === "drive") return f.mine === false && f.owner ? t("Google ドライブ（{name} さんのファイル）", { name: f.owner }) : t("Google ドライブ");
+    return Store.state() === "ready" ? Store.folderName() : Store.supported ? t("フォルダ") : t("このブラウザ");
+  }
+  // Google ドライブの、つないでいるアカウント（メールアドレス）
+  function driveWho() { var a = Store.drive ? Store.drive.account() : {}; return a.email || a.name || ""; }
   function when(ts) {
     var d = new Date(ts), now = new Date();
     var hm = d.getHours() + ":" + ("0" + d.getMinutes()).slice(-2);
@@ -195,13 +200,50 @@
   }
   function failed(e) {
     if (window.console) console.error(e);
+    // Google ドライブのログインが切れたときは、つなぎなおすかを聞く（押したときにしかログインの画面を開けないため）
+    if (e && e.message === "auth") { askReconnect(); return; }
+    if (e && /^drive-/.test(e.message || "")) { notify(t("Google ドライブに保存できませんでした。インターネットのつながりを確かめてください")); return; }
     notify(Store.supported ? t("保存できませんでした。フォルダを使う許可を確かめてください") : t("保存できませんでした。端末の空きを確かめてください"));
   }
-  // フォルダを使えるようにする（ボタンを押したときに呼ぶ。フォルダを選ぶ・許可をもらう）。使えるなら true
+  // ---------- Google ドライブ ----------
+  //   つなぐ・つなぎなおすは、ボタンを押したときだけ（Google のログインの小さなウィンドウを開くため）。SK Hub Systems アカウントのメールアドレスを、先に選んでおく
+  function connectDrive() {
+    var hint = accountHint();
+    return Store.drive.connect(hint && hint.email || "").then(function (ok) {
+      if (ok) notify(t("Google ドライブ（{who}）につなぎました", { who: driveWho() }));
+      else notify(t("Google ドライブにつなげませんでした"));
+      return ok;
+    }, function (e) { if (window.console) console.error(e); notify(t("Google ドライブにつなげませんでした。インターネットのつながりを確かめてください")); return false; });
+  }
+  var asking = false;
+  function askReconnect() {
+    if (asking) return;
+    asking = true;
+    M3.confirm({ title: t("Google ドライブにつなぎなおしますか？"), text: t("Google ドライブのログインが切れました（1 時間ごとに切れます）。つなぎなおすと、保存を続けます。"), ok: t("つなぎなおす"), icon: "add_to_drive" }).then(function (ok) {
+      asking = false;
+      if (!ok) { setStatus(t("保存できませんでした")); return; }
+      return connectDrive().then(function (done) { if (!done) return; if (current && dirty) saveNow(); else if (/^#f=/.test(location.hash) && !current) route(); else renderStart(); });
+    });
+  }
+  // 新しいファイルを入れる場所を使えるようにする（ボタンを押したときに呼ぶ。フォルダを選ぶ・許可をもらう・Google ドライブにつなぐ）。使えるなら true
   function ensureFolder() {
+    if (Store.place() === "drive") {
+      if (Store.driveState() === "ready") return Promise.resolve(true);
+      return connectDrive();
+    }
     var s = Store.state();
     if (s === "unsupported" || s === "ready") return Promise.resolve(true);
     return (s === "none" ? Store.pick() : Store.allow()).then(function (ok) { if (ok) afterFolder(true); return ok; });
+  }
+  // 保存先を切りかえる（"local"・"drive"）。Google ドライブは、つないでいなければつなぐ
+  function setPlace(p) {
+    var go = p === "drive" && Store.driveState() !== "ready" ? connectDrive() : Promise.resolve(true);
+    return go.then(function (ok) {
+      if (!ok) return;
+      Store.setPlace(p);
+      notify(p === "drive" ? t("新しいファイルは Google ドライブに保存します") : t("新しいファイルはこの PC に保存します"));
+      renderStart();
+    });
   }
 
   // ---------- スナックバー ----------
@@ -342,6 +384,26 @@
     });
   }
   function pickImage() { return pickFile("image/*").then(imageData); }
+  // 大きな部品（ExcelJS・SheetJS・PptxGenJS など）は、使うときだけ読み込む。
+  //   同じファイルは 1 回だけ読み込み、読み込み中に何度呼ばれても同じ Promise を返す。
+  //   読み込めなかったときは、次の機会にもう一度試せるように、覚えていた Promise を消す。
+  var vendorLoads = {};
+  function loadScript(src) {
+    src = String(src || "");
+    if (!src) return Promise.reject(new Error("no-src"));
+    if (vendorLoads[src]) return vendorLoads[src];
+    vendorLoads[src] = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = src; s.async = true;
+      s.onload = function () { resolve(s); };
+      s.onerror = function () { delete vendorLoads[src]; s.remove(); reject(new Error("load-failed: " + src)); };
+      document.head.appendChild(s);
+    });
+    return vendorLoads[src];
+  }
+  function loadVendor(name) {
+    return loadScript(BASE + "shared/vendor/" + String(name || "").replace(/^\/+/, ""));
+  }
   // ファイルとして書き出す（Chrome・Edge は保存する場所を選ぶ。それ以外はダウンロード）
   function saveBlob(name, blob, desc, mime, ext) {
     if (typeof window.showSaveFilePicker === "function" && ext) {
@@ -374,6 +436,7 @@
     sync: function () { syncRibbon(); },
     menu: menu, palette: palette, closeMenu: closeMenu,
     pickImage: pickImage, pickFile: pickFile, imageData: imageData, saveBlob: saveBlob,
+    loadScript: loadScript, loadVendor: loadVendor,
     zoom: function () { return zoom / 100; },
     readMode: function () { return readMode; },
     userName: userName,
@@ -494,7 +557,10 @@
   }
   // フォルダを選んでいない・許可がいるときのお知らせ（showUnsupported: フォルダに保存できないブラウザのお知らせも出す）
   function banner(showUnsupported) {
+    // Google ドライブに保存しているのに、ログインが切れているとき
+    if (Store.driveState() === "needs-auth") return '<div class="folder-card">' + icon("add_to_drive") + '<div class="folder-card__text"><strong>' + esc(t("Google ドライブにつなぎなおしてください")) + "</strong><p>" + esc(t("Google ドライブのログインは 1 時間ごとに切れます。つなぎなおすと、ドライブのファイルが出ます。")) + '</p></div><button type="button" class="m3-btn m3-state" data-drive-connect>' + esc(t("つなぎなおす")) + "</button></div>";
     var s = Store.state();
+    if (Store.place() === "drive") return "";
     if (s === "ready") return "";
     if (s === "unsupported") return showUnsupported ? '<div class="note-card">' + icon("info") + "<p>" + esc(t("このブラウザでは PC のフォルダに保存できないので、ブラウザの中に保存します。パソコンの Chrome か Edge なら、フォルダにファイルとして保存できます。")) + "</p></div>" : "";
     if (s === "needs-permission") return '<div class="folder-card">' + icon("folder_open") + '<div class="folder-card__text"><strong>' + esc(t("フォルダ「{name}」を使う許可が必要です", { name: Store.folderName() })) + "</strong><p>" + esc(t("ブラウザを開き直すと、もう一度許可を聞かれることがあります。")) + '</p></div><button type="button" class="m3-btn m3-state" data-allow>' + esc(t("許可する")) + "</button></div>";
@@ -531,17 +597,22 @@
     return x ? t(".skdoc・.sksheet・.skslide と {more} を開く", { more: x }) : t(".skdoc・.sksheet・.skslide を開く");
   }
   function viewOpen() {
-    var s = Store.state();
+    var s = Store.state(), onDrive = Store.place() === "drive", ds = Store.driveState();
     var here = s === "unsupported" ? ["public", t("このブラウザ"), t("ブラウザの中に保存したファイル")]
       : s === "ready" ? ["computer", t("この PC"), t("フォルダ「{name}」", { name: Store.folderName() })]
       : ["computer", t("この PC"), t("フォルダを選んでいません")];
+    // 保存先（押すと、新しいファイルをそこに保存する）。Google ドライブは、Google Cloud の設定がまだのときは押せない
+    var drive = ds === "unconfigured"
+      ? '<button type="button" class="place m3-state" role="listitem" data-todo="' + esc(t("Google ドライブ")) + '">' + icon("add_to_drive") + "<span><strong>" + esc(t("Google ドライブ")) + "</strong><small>" + esc(t("準備中です")) + "</small></span></button>"
+      : '<button type="button" class="place' + (onDrive ? " is-on" : "") + ' m3-state" role="listitem" data-place="drive" aria-pressed="' + onDrive + '">' + icon("add_to_drive") + "<span><strong>" + esc(t("Google ドライブ")) + "</strong><small>" +
+        esc(ds === "off" ? t("つないで、どの端末からでも開く") : ds === "needs-auth" ? t("つなぎなおしが必要です") : driveWho()) + "</small></span></button>";
     return '<h1 class="start__h1">' + esc(t("開く")) + "</h1>" + banner(true) +
       '<div class="open">' +
         '<div class="open__places" role="list">' +
-          '<button type="button" class="place is-on m3-state" role="listitem">' + icon(here[0]) + "<span><strong>" + esc(here[1]) + "</strong><small>" + esc(here[2]) + "</small></span></button>" +
-          (Store.supported ? '<button type="button" class="place m3-state" role="listitem" data-pick>' + icon("drive_folder_upload") + "<span><strong>" + esc(t("フォルダを変更")) + "</strong><small>" + esc(t("ほかのフォルダに保存する")) + "</small></span></button>" : "") +
+          '<button type="button" class="place' + (onDrive ? "" : " is-on") + ' m3-state" role="listitem" data-place="local" aria-pressed="' + !onDrive + '">' + icon(here[0]) + "<span><strong>" + esc(here[1]) + "</strong><small>" + esc(here[2]) + "</small></span></button>" +
+          drive +
+          (Store.supported && !onDrive ? '<button type="button" class="place m3-state" role="listitem" data-pick>' + icon("drive_folder_upload") + "<span><strong>" + esc(t("フォルダを変更")) + "</strong><small>" + esc(t("ほかのフォルダに保存する")) + "</small></span></button>" : "") +
           '<button type="button" class="place m3-state" role="listitem" data-import>' + icon("upload_file") + "<span><strong>" + esc(t("参照")) + "</strong><small>" + esc(importLabel()) + "</small></span></button>" +
-          '<button type="button" class="place m3-state" role="listitem" data-todo="' + esc(t("SK Hub Systems アカウント")) + '">' + icon("cloud") + "<span><strong>" + esc(t("SK Hub Systems アカウント")) + "</strong><small>" + esc(t("インターネット上への保存は準備中です")) + "</small></span></button>" +
         '</div><div class="open__main"><div id="legacy"></div>' + fileSection(false) + "</div>" +
       "</div>";
   }
@@ -550,7 +621,7 @@
     var f = current, a = APPS[APP];
     return '<h1 class="start__h1">' + esc(t("情報")) + "</h1>" +
       '<section class="info-card"><span class="info-card__ico frow__ico" data-app="' + APP + '">' + icon(a.icon, true) + '</span><div class="info-card__text"><strong data-i18n-skip>' + esc(f.name) + "</strong><small>" +
-        esc(f.outside ? t("フォルダの外のファイル（直接保存しています）") : Store.state() === "ready" ? t("フォルダ「{name}」", { name: Store.folderName() }) : t("このブラウザ")) + "</small></div>" +
+        esc(f.place === "drive" ? where(f) + (driveWho() ? "・" + driveWho() : "") : f.outside ? t("フォルダの外のファイル（直接保存しています）") : Store.state() === "ready" ? t("フォルダ「{name}」", { name: Store.folderName() }) : t("このブラウザ")) + "</small></div>" +
         '<button type="button" class="text-btn m3-state" data-rename>' + esc(t("名前を変更")) + "</button></section>" +
       '<dl class="props"><dt>' + esc(t("更新日時")) + "</dt><dd>" + esc(when(f.updated || Date.now())) + "</dd><dt>" + esc(t("作成日時")) + "</dt><dd>" + esc(when(f.created || Date.now())) + "</dd>" +
         "<dt>" + esc(t("大きさ")) + "</dt><dd>" + esc(bytes(JSON.stringify(f.data).length)) + "</dd>" + (App.props ? App.props().map(function (p) { return "<dt>" + esc(p[0]) + "</dt><dd>" + esc(p[1]) + "</dd>"; }).join("") : "") + "</dl>" +
@@ -620,6 +691,8 @@
     var services = [s === "unsupported" ? ["public", t("このブラウザ"), t("ブラウザの中に保存したファイル")]
       : ["computer", t("この PC"), s === "none" ? t("フォルダを選んでいません") : t("フォルダ「{name}」", { name: Store.folderName() })]];
     if (hint) services.push(["cloud", t("SK Hub Systems アカウント"), hint.email || hint.name || ""]);
+    var ds = Store.driveState();
+    if (ds === "ready" || ds === "needs-auth") services.push(["add_to_drive", t("Google ドライブ"), (driveWho() || "") + (ds === "needs-auth" ? t("（つなぎなおしが必要です）") : "")]);
     var canInstall = installEvt && !standalone;
     // 右の大きなボタン: [アイコン, ボタンの文字, 見出し, 説明, ボタンの属性（なければ押せない）]
     var tiles = [
@@ -649,8 +722,11 @@
             '<ul class="acct-services">' + services.map(function (x) {
               return "<li>" + icon(x[0]) + '<span><strong>' + esc(x[1]) + "</strong><small>" + esc(x[2]) + "</small></span></li>";
             }).join("") + "</ul>" +
-            '<button type="button" class="acct-btn m3-state" data-todo="' + esc(t("インターネット上への保存")) + '">' + esc(t("サービスの追加")) + icon("expand_more") + "</button>" +
-            '<p class="start__note">' + esc(t("ファイルは、ログインしてもしなくても、この PC に保存されます。インターネット上への保存（ほかの端末で開く・共有する）は準備中です。")) + "</p></section>" +
+            (ds === "unconfigured" ? '<button type="button" class="acct-btn m3-state" data-todo="' + esc(t("Google ドライブ")) + '">' + esc(t("サービスの追加")) + icon("expand_more") + "</button>"
+              : ds === "off" ? '<button type="button" class="acct-btn m3-state" data-drive-connect>' + icon("add_to_drive") + esc(t("Google ドライブをつなぐ")) + "</button>"
+              : '<button type="button" class="acct-btn m3-state" data-drive-disconnect>' + esc(t("Google ドライブを外す")) + "</button>") +
+            '<p class="start__note">' + esc(ds === "unconfigured" ? t("ファイルは、ログインしてもしなくても、この PC に保存されます。インターネット上への保存（ほかの端末で開く・共有する）は準備中です。")
+              : t("Google ドライブをつなぐと、ファイルを自分の Google ドライブの「SK Hub Office」フォルダに保存して、どの端末からでも開けます。SK Hub Office が見られるのは、SK Hub Office で作った・開いたファイルだけです。")) + "</p></section>" +
         "</div>" +
         '<div class="acct__col">' +
           '<section class="acct__sec"><h2 class="acct__h">' + esc(t("製品情報")) + "</h2>" +
@@ -688,7 +764,11 @@
         optRow("animation", t("動きを減らす"), t("起動画面や、画面の切りかえの動きを止めます"), '<input type="checkbox" class="tbs-switch" id="opt-motion"' + (settings.motion === "reduce" ? " checked" : "") + ' aria-label="' + esc(t("動きを減らす")) + '">') +
       "</section>" +
       '<section class="opts"><h2 class="opts__title">' + esc(t("保存")) + "</h2>" +
-        optRow("folder", t("保存先"), place, s === "unsupported" ? "" : '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-pick>' + esc(s === "none" ? t("フォルダを選ぶ") : t("変更")) + "</button>") +
+        (Store.driveState() === "unconfigured" ? "" : optRow("cloud", t("新しいファイルの保存先"), Store.place() === "drive" ? t("Google ドライブ（{who}）", { who: driveWho() }) : t("この PC"),
+          '<div class="tbs-seg" role="radiogroup" aria-label="' + esc(t("新しいファイルの保存先")) + '">' + [["local", "computer", t("この PC")], ["drive", "add_to_drive", t("Google ドライブ")]].map(function (x) {
+            return '<button type="button" class="tbs-seg__btn m3-state" role="radio" aria-checked="' + (Store.place() === x[0]) + '" data-place="' + x[0] + '"><span class="msr tbs-seg__check" aria-hidden="true">check</span><span class="msr tbs-seg__icon" aria-hidden="true">' + x[1] + "</span>" + esc(x[2]) + "</button>";
+          }).join("") + "</div>")) +
+        optRow("folder", t("この PC の保存先"), place, s === "unsupported" ? "" : '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-pick>' + esc(s === "none" ? t("フォルダを選ぶ") : t("変更")) + "</button>") +
         optRow("save", t("自動保存"), t("変えたらすぐに保存します。オフにすると、保存のボタンか Ctrl+S で保存します"), '<input type="checkbox" class="tbs-switch" id="opt-autosave"' + (settings.autosave ? " checked" : "") + ' aria-label="' + esc(t("自動保存")) + '">') +
         '<div id="legacy"></div>' +
       "</section>" +
@@ -715,7 +795,7 @@
           '<button type="button" class="tab m3-state" role="tab" data-ftab="recent" aria-selected="' + (fileTab === "recent") + '"><span>' + esc(t("最近使ったアイテム")) + "</span></button>" +
           '<button type="button" class="tab m3-state" role="tab" data-ftab="pinned" aria-selected="' + (fileTab === "pinned") + '"><span>' + esc(t("ピン留め")) + "</span></button>" +
           '<span class="tabs__ind" aria-hidden="true"></span></div>'
-          : '<h2 class="start__h2">' + esc(Store.state() === "unsupported" ? t("このブラウザのファイル") : t("フォルダのファイル")) + "</h2>") +
+          : '<h2 class="start__h2">' + esc(Store.driveState() === "ready" ? t("ファイル") : Store.state() === "unsupported" ? t("このブラウザのファイル") : t("フォルダのファイル")) + "</h2>") +
         '<label class="search">' + icon("search") + '<input type="search" id="file-search" placeholder="' + esc(t("検索")) + '" value="' + esc(query) + '" autocomplete="off" aria-label="' + esc(t("ファイルを検索")) + '"></label>' +
       "</div>" +
       '<div class="ftable" role="table" aria-label="' + esc(t("ファイル")) + '">' +
@@ -723,7 +803,8 @@
         '<div id="files" data-i18n-skip><div class="files-loading">' + esc(t("読み込んでいます…")) + "</div></div>" +
       "</div>" +
       '<p class="files-empty" id="files-empty" hidden></p>' +
-      '<p class="start__note">' + esc(Store.state() === "unsupported" ? t("ファイルは、このブラウザの中に保存されます。SK Hub Office は開発中です。") : t("ファイルは、この PC の選んだフォルダに保存されます。SK Hub Office は開発中です。")) + "</p></section>";
+      '<p class="start__note">' + esc(Store.place() === "drive" ? t("新しいファイルは、Google ドライブの「SK Hub Office」フォルダに保存されます。SK Hub Office は開発中です。")
+        : Store.state() === "unsupported" ? t("ファイルは、このブラウザの中に保存されます。SK Hub Office は開発中です。") : t("ファイルは、この PC の選んだフォルダに保存されます。SK Hub Office は開発中です。")) + "</p></section>";
   }
   function tplCard(app, tp) {
     var blank = tp.cat === "blank";
@@ -753,8 +834,10 @@
         return !query || f.name.toLowerCase().indexOf(query.toLowerCase()) >= 0;
       }).sort(function (a, b) { return (isPinned(b.id) ? 1 : 0) - (isPinned(a.id) ? 1 : 0) || b.updated - a.updated; });
       var empty = $("files-empty"), s = Store.state();
+      if (Store.driveError && Store.driveError.message === "auth") renderStart();
+      else if (Store.driveError) notify(t("Google ドライブのファイルを読めませんでした。インターネットのつながりを確かめてください"));
       empty.hidden = list.length > 0;
-      empty.textContent = s === "none" || s === "needs-permission" ? t("フォルダを使えるようにすると、ここにファイルが出ます。")
+      empty.textContent = (s === "none" || s === "needs-permission") && Store.driveState() !== "ready" ? t("フォルダを使えるようにすると、ここにファイルが出ます。")
         : query ? t("「{q}」に合うファイルはありません", { q: query })
         : view === "home" && fileTab === "pinned" ? t("ピン留めしたファイルはありません。ファイルの右のピンを押すと、ここに出ます。")
         : APPS[APP] ? t("まだファイルがありません。上のテンプレートを選ぶと、新しく作れます。") : t("まだファイルがありません。上のアプリから作れます。");
@@ -765,7 +848,7 @@
         var a = APPS[f.app], pin = isPinned(f.id);
         return '<div class="frow" role="row" data-app="' + f.app + '">' +
           '<button type="button" class="frow__open m3-state" role="cell" data-open="' + esc(f.id) + '" data-open-app="' + f.app + '">' +
-            '<span class="frow__ico">' + icon(a.icon, true) + '</span><span class="frow__text"><span class="frow__name">' + esc(f.name) + '</span><span class="frow__meta">' + esc(a.name) + " ・ " + esc(where()) + '<span class="frow__when-sm"> ・ ' + esc(when(f.updated)) + "</span></span></span></button>" +
+            '<span class="frow__ico">' + icon(a.icon, true) + '</span><span class="frow__text"><span class="frow__name">' + esc(f.name) + '</span><span class="frow__meta">' + esc(a.name) + " ・ " + esc(where(f)) + '<span class="frow__when-sm"> ・ ' + esc(when(f.updated)) + "</span></span></span></button>" +
           '<span class="ftable__when" role="cell">' + esc(when(f.updated)) + "</span>" +
           '<span class="frow__act" role="cell">' +
             '<button type="button" class="icon-btn m3-state" data-pin="' + esc(f.id) + '" aria-pressed="' + pin + '" aria-label="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '" title="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '">' + icon("push_pin") + "</button>" +
@@ -818,7 +901,8 @@
       if (v === "export") return Store.get(id).then(function (f) { return f && Store.exportFile(f); }).then(function (ok) { if (ok) notify(t("書き出しました")); });
       if (v === "delete") {
         return M3.confirm({ title: t("「{name}」を削除しますか？", { name: name }),
-          text: Store.state() === "unsupported" ? t("このブラウザから消えます。元に戻すことはできません。") : t("フォルダ「{folder}」からファイルを削除します。ごみ箱には入らず、元に戻すことはできません。", { folder: Store.folderName() }),
+          text: Store.isDrive(id) ? t("Google ドライブのごみ箱に移します。30 日のあいだは、Google ドライブのごみ箱から戻せます。")
+            : Store.state() === "unsupported" ? t("このブラウザから消えます。元に戻すことはできません。") : t("フォルダ「{folder}」からファイルを削除します。ごみ箱には入らず、元に戻すことはできません。", { folder: Store.folderName() }),
           ok: t("削除"), danger: true, icon: "delete" })
           .then(function (ok) { if (!ok) return; return Store.remove(id).then(function () { setPinned(id, false); Store.dropVersions(id); renderFileTable(); notify(t("削除しました")); }); });
       }
@@ -885,18 +969,21 @@
         return '<button type="button" class="rb-icon m3-state' + (b.drop ? " rb-icon--drop" : "") + '"' + btnAttrs(b) + ' aria-label="' + esc(b.label) + '" title="' + esc(b.label + (b.sub ? "（" + b.sub + "）" : "")) + '">' + icon(b.icon) + (b.drop ? '<span class="msr rb-drop" aria-hidden="true">arrow_drop_down</span>' : "") + "</button>";
       }).join("") + "</div>";
     }).join("") + "</div>";
-    if (x.styles) return '<div class="rb-styles">' + x.styles.map(function (s) {
-      return '<button type="button" class="rb-style rb-style--' + s.tag + ' m3-state" data-cmd="fmt:' + s.tag + '" data-toggle="fmt:' + s.tag + '"><span class="rb-style__sample">' + esc(t("あア亜Aa")) + "</span><span>" + esc(s.label) + "</span></button>";
-    }).join("") + "</div>";
+    if (x.styles) { var sl = typeof x.styles === "function" ? x.styles() : x.styles; return '<div class="rb-styles">' + sl.map(function (s) {
+      var c = s.cmd || ("fmt:" + s.tag), tg = s.toggle || c;
+      return '<button type="button" class="rb-style rb-style--' + s.tag + ' m3-state" data-cmd="' + esc(c) + '" data-toggle="' + esc(tg) + '"><span class="rb-style__sample">' + esc(t("あア亜Aa")) + "</span><span>" + esc(s.label) + "</span></button>";
+    }).join("") + "</div>"; }
     return "";
   }
   // prevTab: 切りかえる前のタブ（中身を右・左のどちらから入れるかを決める）
   function ribbonTabs() { return App.ribbon.filter(function (tb) { return !tb.when || tb.when(); }); }
+  // リボンの样子（タブの名前＋アプリが変える部分）。変わったら作り直す
+  function ribbonSig() { return ribbonTabs().map(function (tb) { return tb.tab; }).join("|") + (App.ribbonSig ? "#" + App.ribbonSig() : ""); }
   function renderRibbon(prevTab) {
     var tabs = ribbonTabs(), row = $("rtabs");
     if (ribbonTab >= tabs.length) ribbonTab = 0;
     // タブの行は、タブが同じあいだは作り直さない（作り直すと、押したボタンが消えて下線もずれる）
-    var sig = tabs.map(function (tb) { return tb.tab; }).join("|");
+    var sig = ribbonSig();
     if (row.getAttribute("data-sig") !== sig) {
       row.setAttribute("data-sig", sig);
       row.innerHTML = '<button type="button" class="rtab rtab--file m3-state" data-file>' + icon("folder", true) + esc(t("ファイル")) + "</button>" +
@@ -947,7 +1034,7 @@
   var syncTimer = null;
   function syncRibbon() {
     if (!App || !current || !$("rbody")) return;
-    var sig = ribbonTabs().map(function (tb) { return tb.tab; }).join("|");
+    var sig = ribbonSig();
     if ($("rtabs").getAttribute("data-sig") !== sig) {
       var tabs = ribbonTabs(), ctx = -1;
       tabs.forEach(function (tb, i) { if (tb.ctx) ctx = i; });
@@ -1164,7 +1251,7 @@
       [t("バージョン"), t("{v}（開発中）", { v: VERSION })],
       [t("含まれるアプリ"), "Doc・Sheet・Slide"],
       [t("使い方"), standalone ? t("インストールして使っています") : t("ブラウザで使っています")],
-      [t("保存先"), s === "unsupported" ? t("このブラウザの中") : s === "none" ? t("フォルダを選んでいません") : t("この PC のフォルダ「{name}」", { name: Store.folderName() })],
+      [t("保存先"), Store.place() === "drive" ? t("Google ドライブ（{who}）", { who: driveWho() }) : s === "unsupported" ? t("このブラウザの中") : s === "none" ? t("フォルダを選んでいません") : t("この PC のフォルダ「{name}」", { name: Store.folderName() })],
       [t("見た目"), "SK Material（Material Design 3）"],
       [t("文字・アイコン"), "M PLUS 1・Material Symbols Rounded"]
     ];
@@ -1172,7 +1259,7 @@
         '<p class="about__name">' + (a ? "SK Hub Office " + a.name : "SK Hub Office") + "</p>" +
         '<p class="about__sub">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p></div></div>" +
       '<dl class="about__list">' + rows.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") + "</dl>" +
-      '<p class="about__note">' + esc(t("文書・表・スライドの機能は、すべて SK が自作しています。ファイルは、ログインしてもしなくても、この PC に保存されます。")) + "</p>" +
+      '<p class="about__note">' + esc(t("文書・表・スライドの機能は、すべて SK が自作しています。ファイルは、この PC か、つないだ自分の Google ドライブに保存されます。")) + "</p>" +
       '<div class="about__links">' +
         '<a href="' + SITE + '/products/office/"' + blank + ">" + esc(t("製品のページ")) + "</a>" +
         '<a href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a>" +
@@ -1186,7 +1273,7 @@
         if (!ok) return;
         lastVersion = Date.now();
         Store.addVersion(current.id, current.data);
-        notify(current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
+        notify(current.place === "drive" ? t("Google ドライブに保存しました") : current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
       });
       return;
     }
@@ -1271,6 +1358,16 @@
     }
     if (e.target.closest("[data-pick]")) {
       Store.pick().then(function (ok) { if (ok) { notify(t("フォルダ「{name}」に保存します", { name: Store.folderName() })); afterFolder(); } });
+      return;
+    }
+    if ((el = e.target.closest("[data-place]"))) { setPlace(el.getAttribute("data-place")); return; }
+    if (e.target.closest("[data-drive-connect]")) { connectDrive().then(function (ok) { if (ok) afterFolder(); }); return; }
+    if (e.target.closest("[data-drive-disconnect]")) {
+      M3.confirm({ title: t("Google ドライブを外しますか？"), text: t("Google ドライブのファイルは消えません。つなぎなおすと、また開けます。"), ok: t("外す"), icon: "link_off" }).then(function (ok) {
+        if (!ok) return;
+        Store.setPlace("local");
+        Store.drive.disconnect().then(function () { notify(t("Google ドライブを外しました")); renderStart(); });
+      });
       return;
     }
     if (e.target.closest("[data-allow]")) {
@@ -1376,12 +1473,12 @@
     var m = location.hash.match(/^#f=(.+)$/);
     var id = m && APPS[APP] ? decodeURIComponent(m[1]) : null;
     if (!id || !$("editor") || !App) { showStart(); return Promise.resolve(); }
-    // フォルダの許可がまだのときは、スタート画面で「許可する」を押してもらう（押したら、このファイルを開く）
-    if (Store.supported && Store.state() !== "ready" && !Store.isOutside(id)) { showStart(); return Promise.resolve(); }
+    // フォルダの許可がまだのとき・Google ドライブのログインが切れているときは、スタート画面で押してもらう（押したら、このファイルを開く）
+    if (Store.isDrive(id) ? Store.driveState() !== "ready" : Store.supported && Store.state() !== "ready" && !Store.isOutside(id)) { showStart(); return Promise.resolve(); }
     return Store.get(id).then(function (f) {
       if (f && f.app === APP) { show("editor"); openEditor(f); }
       else { history.replaceState(null, "", location.pathname); notify(t("ファイルが見つかりませんでした")); showStart(); }
-    });
+    }, function (e) { showStart(); failed(e); });
   }
   // フォルダを選んだ・許可したあと（開こうとしていたファイルがあれば開く）
   function afterFolder(quiet) {

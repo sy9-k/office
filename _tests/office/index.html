@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>SK Hub Office のテスト</title>
+<!-- 書き出し（.docx・.xlsx・.pptx）と読み込みのテスト。python _tests/office/run.py で、ブラウザを見えないまま動かして確かめる。
+     このページを手で開いてもよい（python -m http.server 8765 → http://localhost:8765/_tests/office/）。_ で始まるので公開されない -->
+<!-- 画面の大きさ・行の高さを本物と同じにする（Sheet は見えている行だけ作るので、表の高さが決まっている必要がある） -->
+<link rel="stylesheet" href="../../office/shared/office.css">
+<style>
+  body { font: 14px/1.6 system-ui, sans-serif; margin: 16px; color: #1a1c20; background: #fff; height: auto; overflow: auto; }
+  h1 { font-size: 20px; }
+  .ok { color: #15803d; } .ng { color: #b91c1c; font-weight: 700; }
+  #log { white-space: pre-wrap; font-family: Consolas, monospace; font-size: 12px; }
+  /* アプリが画面を作る場所（見えなくてよい。大きさは測るので、画面の中に置く） */
+  #test-stage { position: fixed; left: 0; top: 0; width: 1200px; height: 800px; opacity: 0; pointer-events: none; overflow: hidden; }
+</style>
+</head>
+<body>
+  <h1>SK Hub Office のテスト</h1>
+  <p id="sum">動かしています…</p>
+  <div id="log"></div>
+  <div id="test-stage"><div class="canvas" id="canvas" style="height:760px"></div><div id="stat"></div></div>
+
+  <script src="../../office/shared/templates.js"></script>
+  <script src="../../office/shared/formula.js"></script>
+  <script src="../../office/shared/chart.js"></script>
+  <script src="../../office/shared/zip.js"></script>
+  <script src="../../office/shared/vendor/opentype.min.js"></script>
+  <script src="../../office/shared/doc.js"></script>
+  <script src="../../office/shared/sheet.js"></script>
+  <script src="../../office/shared/slide.js"></script>
+  <!-- 保存（store.js）と Google ドライブ（drive.js）。本物のドライブの代わりに drive-mock.js を使う -->
+  <script src="drive-mock.js"></script>
+  <script src="../../office/shared/drive.js"></script>
+  <script src="../../office/shared/store.js"></script>
+  <!-- テストだけの第三者エンジン。docx-preview は書き出した .docx を別の実装でも開けるか、
+       docx（dolanmiu）は本物のアンカー画像を読みこめるかを確かめる -->
+  <script src="./vendor/jszip.min.js"></script>
+  <script src="./vendor/docx.umd.js"></script>
+  <script>window.SK_DOCX_GEN = window.docx;</script>
+  <script src="./vendor/docx-preview.min.js"></script>
+  <script src="fixtures.js"></script>
+  <script src="run.js"></script>
+</body>
+</html>

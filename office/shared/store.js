@@ -10,9 +10,14 @@
 //   ・前にブラウザの中に保存したファイルは、フォルダを選んだあとに migrate() でフォルダに移せる
 //   ・アプリとして入れたあと、エクスプローラー・Finder で .skdoc などをダブルクリックしたときは openHandle() で、そのファイルに直接保存する
 //   ・版の履歴（versions・addVersion）は、このブラウザの IndexedDB に残す（ほかの PC には移らない）
-//   どれも Promise を返す（state()・folderName()・supported だけはすぐ返す）
+//   ・Google ドライブ（drive.js の window.OfficeDrive）にも保存できる。ファイルの ID が「g:」で始まるものは Google ドライブのファイル。
+//     新しく作るファイルをどこに入れるかは place()（"local": この PC のフォルダかブラウザの中・"drive": Google ドライブ）。setPlace() で変える
+//     list() は両方のファイルを返す（どちらのファイルかは place）。get・save・rename・remove は ID で、どちらに行くかを決める
+//   どれも Promise を返す（state()・folderName()・supported・place()・driveState() だけはすぐ返す）
 (function () {
   "use strict";
+  var Drive = window.OfficeDrive || null;
+  var PLACE_KEY = "sk_office_place";
   var EXT = { doc: ".skdoc", sheet: ".sksheet", slide: ".skslide" };
   var FORMAT = "sk-hub-office";
   var FILE_VERSION = 2; // 1 は 0.1。2 は書式・複数シート・ノートなどを足した形（1 も読める）
@@ -95,12 +100,41 @@
     });
   }
 
+  // ---------- Google ドライブ ----------
+  function isDrive(id) { return String(id).slice(0, 2) === "g:"; }
+  function gid(id) { return String(id).slice(2); }
+  function driveState() { return Drive ? Drive.state() : "unconfigured"; }
+  function driveFile(m, extra) {
+    var app = appOf(m.name) || m.app;
+    return Object.assign({ id: "g:" + m.id, app: app, name: baseName(m.name), updated: m.updated, created: m.created, size: m.size, place: "drive", mine: m.mine, owner: m.owner, canEdit: m.canEdit }, extra || {});
+  }
+  // 同じファイルの保存が続いたら、いま送っている分が終わってから、いちばん新しい中身だけを送る（自動保存で何度も送らない）
+  var driveQ = {};
+  function driveSave(id, text) {
+    var x = driveQ[id] || (driveQ[id] = { running: null, pending: null, next: null });
+    x.pending = text;
+    if (!x.running) return start();
+    return x.next || (x.next = x.running.catch(function () {}).then(start));
+    function start() {
+      var body = x.pending;
+      x.pending = null; x.next = null;
+      x.running = Drive.save(id, body).then(function (m) { x.running = null; return m; }, function (e) { x.running = null; throw e; });
+      return x.running;
+    }
+  }
+
   var Store = {
     EXT: EXT,
     supported: supported,
     appOf: appOf,
     state: function () { return state; },
     folderName: function () { return folder ? folder.name : ""; },
+    isDrive: isDrive,
+    driveState: driveState,
+    drive: Drive,
+    // 新しいファイルを入れる場所（"local"・"drive"）。Google ドライブを使えないときは "local"
+    place: function () { var p = ""; try { p = localStorage.getItem(PLACE_KEY) || ""; } catch (e) { /* なし */ } return p === "drive" && driveState() !== "unconfigured" && driveState() !== "off" ? "drive" : "local"; },
+    setPlace: function (p) { try { localStorage.setItem(PLACE_KEY, p === "drive" ? "drive" : "local"); } catch (e) { /* このページだけ */ } },
 
     // 前に選んだフォルダを読み出して、許可があるか確かめる
     init: function () {
@@ -124,9 +158,18 @@
       return folder.requestPermission({ mode: "readwrite" }).then(function (p) { state = p === "granted" ? "ready" : "needs-permission"; return state === "ready"; }, function () { return false; });
     },
 
-    // ファイルの一覧（中身は読まない）: [{ id, app, name, updated, size }]
+    // ファイルの一覧（中身は読まない）: [{ id, app, name, updated, size, place }]。Google ドライブを読めなかったときは driveError に理由を入れる
     list: function () {
-      if (!supported) return Promise.resolve(lsAll().map(function (f) { return { id: f.id, app: f.app, name: f.name, updated: f.updated }; }));
+      Store.driveError = null;
+      var drive = driveState() === "ready"
+        ? Drive.list().then(function (all) { return all.map(function (m) { return driveFile(m); }).filter(function (f) { return EXT[f.app]; }); }, function (e) { Store.driveError = e; return []; })
+        : Promise.resolve([]);
+      // この PC のフォルダを読めなくても、Google ドライブのファイルは出す（両方だめなときだけ失敗にする）
+      var local = Store.listLocal().catch(function (e) { if (driveState() !== "ready") throw e; Store.localError = e; return []; });
+      return Promise.all([local, drive]).then(function (r) { return r[0].concat(r[1]); });
+    },
+    listLocal: function () {
+      if (!supported) return Promise.resolve(lsAll().map(function (f) { return { id: f.id, app: f.app, name: f.name, updated: f.updated, place: "local" }; }));
       if (!ready()) return Promise.resolve([]);
       var out = [], it = folder.values();
       function step() {
@@ -135,14 +178,21 @@
           var h = r.value, app = h.kind === "file" ? appOf(h.name) : null;
           if (!app) return step();
           return h.getFile().then(function (file) {
-            out.push({ id: h.name, app: app, name: baseName(h.name), updated: file.lastModified, size: file.size });
+            out.push({ id: h.name, app: app, name: baseName(h.name), updated: file.lastModified, size: file.size, place: "local" });
             return step();
           }, step);
         });
       }
       return step();
     },
+    // ファイルを読む。見つからない・読めないときは null（Google ドライブにつなぎなおしが要るときは、Error("auth") で失敗する）
     get: function (id) {
+      if (isDrive(id)) {
+        return Drive.get(gid(id)).then(function (m) {
+          var o = parse(m.text, appOf(m.name) || m.app);
+          return driveFile(m, { app: o.app, tpl: o.tpl, created: o.created, data: o.data });
+        }, function (e) { if (e && e.message === "auth") throw e; return null; });
+      }
       if (isHandleId(id)) {
         var hd = handles[id];
         if (!hd) return Promise.resolve(null);
@@ -162,9 +212,13 @@
         });
       }).catch(function () { return null; });
     },
-    create: function (app, name, tpl, data) {
+    // where: "local"・"drive"（書かないと place()）
+    create: function (app, name, tpl, data, where) {
       var now = Date.now();
       var f = { app: app, name: name, tpl: tpl || "", created: now, updated: now, data: data };
+      if ((where || Store.place()) === "drive") {
+        return Drive.create(clean(name) + EXT[app], app, payload(f)).then(function (m) { return driveFile(m, { tpl: f.tpl, created: now, data: data }); });
+      }
       if (!supported) {
         f.id = newId();
         return Promise.resolve().then(function () { var list = lsAll(); list.push(f); lsSave(list); return f; });
@@ -178,6 +232,7 @@
     },
     save: function (f) {
       f.updated = Date.now();
+      if (isDrive(f.id)) return driveSave(gid(f.id), payload(f)).then(function () { return f; });
       if (isHandleId(f.id)) {
         var hd = handles[f.id], body = payload(f);
         if (!hd) return Promise.reject(new Error("closed"));
@@ -191,6 +246,7 @@
     },
     // 名前を変える（フォルダでは、新しい名前で書いて、前のファイルを消す）。f.id が変わることがある
     rename: function (f, name) {
+      if (isDrive(f.id)) return Drive.rename(gid(f.id), clean(name) + EXT[f.app]).then(function (m) { f.name = baseName(m.name); f.updated = m.updated; return f; });
       if (isHandleId(f.id)) return Promise.reject(new Error("outside"));
       if (!supported) { f.name = name; return Store.save(f); }
       return inOrder(function () {
@@ -204,19 +260,21 @@
         });
       });
     },
-    // フォルダからファイルを消す（ごみ箱には入らない）
+    // フォルダからファイルを消す（ごみ箱には入らない）。Google ドライブのファイルは、ドライブのごみ箱に入れる（30 日は戻せる）
     remove: function (id) {
+      if (isDrive(id)) return Drive.trash(gid(id));
       if (!supported) { lsSave(lsAll().filter(function (f) { return f.id !== id; })); return Promise.resolve(); }
       return inOrder(function () { return folder.removeEntry(id); });
     },
-    copy: function (f, name) { return Store.create(f.app, name, f.tpl, JSON.parse(JSON.stringify(f.data))); },
+    // コピーは、もとのファイルと同じ場所に作る（共有されたファイルのコピーは、自分のドライブに作る）
+    copy: function (f, name) { return Store.create(f.app, name, f.tpl, JSON.parse(JSON.stringify(f.data)), isDrive(f.id) ? "drive" : "local"); },
 
     // 前にブラウザの中に保存したファイル（フォルダに保存できるブラウザで、フォルダを選んだあとに移す）
     legacy: function () { return supported ? lsAll() : []; },
     migrate: function () {
       var list = lsAll(), done = 0;
       return list.reduce(function (p, f) {
-        return p.then(function () { return Store.create(f.app, f.name, f.tpl, f.data); }).then(function () { done++; });
+        return p.then(function () { return Store.create(f.app, f.name, f.tpl, f.data, "local"); }).then(function () { done++; });
       }, Promise.resolve()).then(function () {
         try { localStorage.removeItem(LS_KEY); } catch (e) { /* 消せなくても、移したものはフォルダにある */ }
         return done;

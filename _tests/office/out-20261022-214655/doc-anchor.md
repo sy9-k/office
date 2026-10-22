@@ -1,0 +1,4 @@
+![floating](image)
+
+floating image
+

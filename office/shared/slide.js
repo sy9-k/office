@@ -1,9 +1,10 @@
 // SK Hub Office の Slide（プレゼンテーション）。window.OfficeApps.slide に登録し、/office/shared/office.js が呼ぶ（O は office.js が渡す道具）
 //   ファイルの中身（data）: { slides: [スライド], theme: "mikan|ocean|matcha|night|mono|sakura", ratio: "16:9|4:3" }
 //     スライド: { layout: "title|bullets|two|section|titleOnly|blank", title, sub, items, items2, notes, bg, trans: "none|fade|push|zoom", objs: [もの] }
-//     もの（自由に置けるもの）: { id, type: "text|shape|image|chart", x, y, w, h（スライドの幅・高さに対する %）, rot（度）, html（文字）,
-//       shape: "rect|round|ellipse|triangle|diamond|arrow|star|callout|line", fill, line, color, fs（文字の大きさ pt。幅 960px のときの大きさ）, b, i, u, align: "l|c|r", va: "t|m|b",
+//     もの（自由に置けるもの）: { id, type: "text|shape|image|chart|group", x, y, w, h（スライドの幅・高さに対する %）, rot（度）, html（文字）,
+//       shape: "rect|round|ellipse|triangle|diamond|arrow|star|callout|line", fill, line, lw（線の太さ pt）, color, fs（文字の大きさ pt。幅 960px のときの大きさ）, b, i, u, align: "l|c|r", va: "t|m|b",
 //       src（画像）, spec（グラフ）, anim: "fade|rise|zoom"（スライド ショーで順に出す） }
+//       グループ: { id, type: "group", x, y, w, h, rot, children: [もの] }。children の x・y・w・h は、グループの幅・高さに対する %
 //   レイアウトの文字（title・sub・items）は、そのまま書きかえる。ものは、押して選び、ドラッグで動かす・角で大きさを変える・上の丸で回す
 //   テーマの色は CSS の変数（office.css の .sl[data-theme]）。.pptx の読み書きは zip.js、グラフは chart.js
 (function () {
@@ -45,16 +46,23 @@
         if (s.image) { s.objs.push({ id: uid(), type: "image", src: s.image, x: 62, y: 52, w: 30, h: 38 }); delete s.image; }
         // ほかの人から受け取ったファイルも開くので、文字の HTML・画像の場所・色は安全なものだけにする
         if (s.bg && !safeColor(s.bg)) delete s.bg;
-        s.objs.forEach(function (o) {
+        eachObj(s.objs, function (o) {
           if (o.html) o.html = cleanText(o.html);
           if (o.src && !/^(data:image\/|https:\/\/)/i.test(o.src)) o.src = "";
           ["fill", "line", "color"].forEach(function (k) { if (o[k] && o[k] !== "none" && !safeColor(o[k])) delete o[k]; });
-          ["x", "y", "w", "h", "rot", "fs"].forEach(function (k) { if (o[k] !== undefined && !isFinite(+o[k])) delete o[k]; else if (o[k] !== undefined) o[k] = +o[k]; });
+          ["x", "y", "w", "h", "rot", "fs", "lw"].forEach(function (k) { if (o[k] !== undefined && !isFinite(+o[k])) delete o[k]; else if (o[k] !== undefined) o[k] = +o[k]; });
         });
       });
       if (!THEMES[d.theme]) d.theme = "mikan";
       if (d.ratio !== "4:3") d.ratio = "16:9";
       return d;
+    }
+    // グループの中も、外と同じように見る
+    function eachObj(list, fn) {
+      (list || []).forEach(function (o) {
+        fn(o);
+        if (o.type === "group") { if (!Array.isArray(o.children)) o.children = []; eachObj(o.children, fn); }
+      });
     }
     // 色として使ってよい文字（#rrggbb・rgb(…)・色の名前・var(--sl-…)）
     function safeColor(c) { return /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%]+\)|[a-z]{3,20}|var\(--sl-[a-z-]+\))$/i.test(String(c)); }
@@ -82,7 +90,7 @@
 
     // ---------- スライドの HTML ----------
     function shapeSvg(o) {
-      var f = o.fill === "none" ? "none" : (o.fill || "var(--sl-accent)"), l = o.line === "none" || !o.line ? "none" : o.line, sw = o.line && o.line !== "none" ? 2 : 0, d;
+      var f = o.fill === "none" ? "none" : (o.fill || "var(--sl-accent)"), l = o.line === "none" || !o.line ? "none" : o.line, sw = o.line && o.line !== "none" ? strokePx(o, 2) : 0, d;
       switch (o.shape) {
         case "ellipse": d = '<ellipse cx="50" cy="50" rx="50" ry="50"'; break;
         case "round": d = '<rect x="0" y="0" width="100" height="100" rx="14" ry="14"'; break;
@@ -91,14 +99,17 @@
         case "arrow": d = '<path d="M0 30 L62 30 L62 5 L100 50 L62 95 L62 70 L0 70 Z"'; break;
         case "star": d = '<path d="M50 2 L61.8 36.5 L98 36.8 L69 58.6 L79.4 93.3 L50 72.6 L20.6 93.3 L31 58.6 L2 36.8 L38.2 36.5 Z"'; break;
         case "callout": d = '<path d="M8 0 H92 Q100 0 100 8 V64 Q100 72 92 72 H40 L22 100 L26 72 H8 Q0 72 0 64 V8 Q0 0 8 0 Z"'; break;
-        case "line": return '<svg class="sl-shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="50" x2="100" y2="50" stroke="' + esc(o.line && o.line !== "none" ? o.line : "var(--sl-ink)") + '" stroke-width="3" vector-effect="non-scaling-stroke"/></svg>';
+        case "line": return '<svg class="sl-shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="50" x2="100" y2="50" stroke="' + esc(o.line && o.line !== "none" ? o.line : "var(--sl-ink)") + '" stroke-width="' + strokePx(o, 3) + '" vector-effect="non-scaling-stroke"/></svg>';
         default: d = '<rect x="0" y="0" width="100" height="100"';
       }
       return '<svg class="sl-shape" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">' + d + ' fill="' + esc(f) + '" stroke="' + esc(l) + '" stroke-width="' + sw + '" vector-effect="non-scaling-stroke"/></svg>';
     }
+    // 線の太さは pt。画面は 1pt = 4/3px（96dpi）で描く
+    function strokePx(o, dflt) { return o.lw != null ? Math.round(o.lw * 4 / 3 * 100) / 100 : dflt; }
     function fsCss(pt) { return "font-size:" + Math.round(pt * 4 / 3 / 9.6 * 1000) / 1000 + "cqw;"; }
     function objHtml(o, mode, r) {
       var st = "left:" + o.x + "%;top:" + o.y + "%;width:" + o.w + "%;height:" + o.h + "%;" + (o.rot ? "transform:rotate(" + o.rot + "deg);" : "");
+      if (o.type === "group") return '<div class="sl-obj sl-obj--group" data-obj="' + esc(o.id) + '" style="' + st + '">' + (o.children || []).map(function (c) { return objHtml(c, mode, r); }).join("") + "</div>";
       var inner = "";
       if (o.type === "image") inner = '<img src="' + esc(o.src || "") + '" alt="' + esc(o.alt || "") + '" draggable="false">';
       else if (o.type === "chart") inner = Chart.svg(o.spec || {}, { w: Math.max(80, o.w * 9.6), h: Math.max(60, o.h * 9.6 / r), transparent: true });
@@ -518,12 +529,13 @@
       if (mod && k.toLowerCase() === "x") { e.preventDefault(); clipObjs = O.copy(selObjs()); command("objDel"); return; }
       if (mod && k.toLowerCase() === "v" && clipObjs) { e.preventDefault(); pasteObjs(); return; }
       if (mod && k.toLowerCase() === "a") { e.preventDefault(); select(slide().objs.map(function (o) { return o.id; })); return; }
+      if (mod && k.toLowerCase() === "g") { e.preventDefault(); command(e.shiftKey ? "ungroup" : "group"); return; }
       if (mod && !e.shiftKey && /^[biu]$/i.test(k)) { e.preventDefault(); command({ b: "bold", i: "italic", u: "underline" }[k.toLowerCase()]); }
     }
     function pasteObjs() {
       if (!clipObjs || readOnly) return;
       var ids = [];
-      clipObjs.forEach(function (o) { var c = O.copy(o); c.id = uid(); c.x += 2; c.y += 2; slide().objs.push(c); ids.push(c.id); });
+      clipObjs.forEach(function (o) { var c = reId(O.copy(o)); c.x += 2; c.y += 2; slide().objs.push(c); ids.push(c.id); });
       clipObjs = clipObjs.map(function (o) { var c = O.copy(o); c.x += 2; c.y += 2; return c; });
       drawStage(); select(ids); refreshThumb(cur); changed();
     }
@@ -531,7 +543,7 @@
       var p = painter;
       painter = null;
       if (!target || !p) { O.sync(); return; }
-      ["fill", "line", "color", "fs", "b", "i", "u", "align", "va"].forEach(function (k) { if (p[k] === undefined) delete target[k]; else target[k] = p[k]; });
+      ["fill", "line", "lw", "color", "fs", "b", "i", "u", "align", "va"].forEach(function (k) { if (p[k] === undefined) delete target[k]; else target[k] = p[k]; });
       redrawObj(target); refreshThumb(cur); changed(); O.sync();
     }
 
@@ -589,6 +601,47 @@
       }
       drawStage(); placeFrame(); refreshThumb(cur); changed();
     }
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function reId(o) { o.id = uid(); if (o.type === "group" && Array.isArray(o.children)) o.children.forEach(reId); return o; }
+    // ---------- グループ（まとめて動かす・大きさを変える） ----------
+    function groupSel() {
+      if (readOnly) return;
+      var list = selObjs();
+      if (list.length < 2) { O.notify(t("グループにするものを 2 つ以上選んでください")); return; }
+      var b = bounds(list), ids = list.map(function (o) { return o.id; }), w = b.w || 1, h = b.h || 1, at = -1;
+      slide().objs.forEach(function (o, i) { if (at < 0 && ids.indexOf(o.id) >= 0) at = i; });
+      var g = { id: uid(), type: "group", x: round2(b.x), y: round2(b.y), w: round2(w), h: round2(h), children: list.map(function (o) {
+        var c = O.copy(o);
+        c.x = Math.round((o.x - b.x) / w * 10000) / 100; c.y = Math.round((o.y - b.y) / h * 10000) / 100;
+        c.w = Math.round(o.w / w * 10000) / 100; c.h = Math.round(o.h / h * 10000) / 100;
+        return c;
+      }) };
+      var out = slide().objs.filter(function (o) { return ids.indexOf(o.id) < 0; });
+      out.splice(Math.max(0, at), 0, g);
+      slide().objs = out;
+      drawStage(); select([g.id]); refreshThumb(cur); changed();
+    }
+    function ungroupSel() {
+      if (readOnly) return;
+      var groups = selObjs().filter(function (o) { return o.type === "group"; });
+      if (!groups.length) { O.notify(t("グループを選んでください")); return; }
+      var ids = groups.map(function (o) { return o.id; }), added = [];
+      slide().objs = (function () {
+        var out = [];
+        slide().objs.forEach(function (o) {
+          if (ids.indexOf(o.id) < 0) { out.push(o); return; }
+          (o.children || []).forEach(function (c) {
+            var k = O.copy(c);
+            k.x = round2(o.x + c.x / 100 * o.w); k.y = round2(o.y + c.y / 100 * o.h);
+            k.w = round2(c.w / 100 * o.w); k.h = round2(c.h / 100 * o.h);
+            if (o.rot) k.rot = (((k.rot || 0) + o.rot) % 360) || undefined;
+            reId(k); added.push(k.id); out.push(k);
+          });
+        });
+        return out;
+      })();
+      drawStage(); select(added); refreshThumb(cur); changed();
+    }
     function command(cmd, at) {
       if (!data) return;
       var slides = data.slides, s = slide(), o1 = selObjs()[0];
@@ -600,6 +653,12 @@
       if (cmd.indexOf("anim:") === 0) { if (!o1) { O.notify(t("アニメーションを付けるものを選んでください")); return; } setObj({ anim: cmd.slice(5) || null }); O.sync(); return; }
       if (cmd.indexOf("align:") === 0) return align(cmd.slice(6));
       if (cmd.indexOf("order:") === 0) return order(cmd.slice(6));
+      if (cmd === "group") return groupSel();
+      if (cmd === "ungroup") return ungroupSel();
+      if (cmd === "lineWidth") {
+        if (!o1) { O.notify(t("図形やテキスト ボックスを選んでください")); return; }
+        return O.menu(at, [{ value: "", label: t("標準") }].concat([0.5, 0.75, 1, 1.5, 2.25, 3, 4.5, 6].map(function (n) { return { value: String(n), label: n + " pt", checked: o1.lw === n }; }))).then(function (v) { if (v !== null) setObj({ lw: v === "" ? null : +v }); });
+      }
       if (cmd.indexOf("tal:") === 0) return setObj({ align: cmd.slice(4) });
       if (cmd.indexOf("tva:") === 0) return setObj({ va: cmd.slice(4) });
       switch (cmd) {
@@ -616,7 +675,7 @@
           if (cmd === "addMenu") return O.menu(at, LAYOUTS).then(function (v) { if (v) addIt(v); });
           return addIt(s.layout === "title" ? "bullets" : s.layout === "section" ? "bullets" : s.layout);
         }
-        case "dup": slides.splice(cur + 1, 0, O.copy(s)); slides[cur + 1].objs.forEach(function (o) { o.id = uid(); }); cur++; sel = []; drawThumbs(); drawStage(); changed(); return;
+        case "dup": slides.splice(cur + 1, 0, O.copy(s)); slides[cur + 1].objs.forEach(reId); cur++; sel = []; drawThumbs(); drawStage(); changed(); return;
         case "del":
           if (slides.length < 2) { O.notify(t("スライドが 1 枚のときは削除できません")); return; }
           slides.splice(cur, 1); cur = Math.min(cur, slides.length - 1); sel = []; drawThumbs(); drawStage(); changed(); O.notify(t("スライドを削除しました。元に戻すで戻せます")); return;
@@ -655,7 +714,8 @@
         case "fill": return O.palette(at, { none: t("塗りつぶしなし"), value: o1 && o1.fill }).then(function (v) { if (v) setObj({ fill: v }); });
         case "line": return O.palette(at, { none: t("枠線なし"), value: o1 && o1.line }).then(function (v) { if (v) setObj({ line: v }); });
         case "arrange":
-          return O.menu(at, [{ head: t("順序") }, { value: "order:front", label: t("最前面へ移動"), icon: "flip_to_front" }, { value: "order:forward", label: t("前面へ移動"), icon: "arrow_upward" },
+          return O.menu(at, [{ head: t("グループ") }, { value: "group", label: t("グループ化"), icon: "group_work" }, { value: "ungroup", label: t("グループ解除"), icon: "call_split" },
+            { head: t("順序") }, { value: "order:front", label: t("最前面へ移動"), icon: "flip_to_front" }, { value: "order:forward", label: t("前面へ移動"), icon: "arrow_upward" },
             { value: "order:backward", label: t("背面へ移動"), icon: "arrow_downward" }, { value: "order:back", label: t("最背面へ移動"), icon: "flip_to_back" },
             { head: t("配置") }, { value: "align:l", label: t("左揃え"), icon: "align_horizontal_left" }, { value: "align:c", label: t("左右中央揃え"), icon: "align_horizontal_center" }, { value: "align:r", label: t("右揃え"), icon: "align_horizontal_right" },
             { value: "align:t", label: t("上揃え"), icon: "align_vertical_top" }, { value: "align:m", label: t("上下中央揃え"), icon: "align_vertical_center" }, { value: "align:b", label: t("下揃え"), icon: "align_vertical_bottom" },
@@ -727,7 +787,8 @@
       ] },
       { tab: t("表示"), groups: [R.view, { label: t("表示"), items: [{ big: 1, icon: "sticky_note_2", label: t("ノート"), cmd: "notes", toggle: "notes" }] }, R.zoom] },
       { tab: t("図形の書式"), ctx: 1, when: function () { return !!(data && selObjs().length); }, groups: [
-        { label: t("スタイル"), items: [{ big: 1, icon: "format_color_fill", label: t("塗りつぶし"), cmd: "fill", drop: 1 }, { big: 1, icon: "border_color", label: t("枠線"), cmd: "line", drop: 1 }, { big: 1, icon: "format_color_text", label: t("文字の色"), cmd: "color", drop: 1 }] },
+        { label: t("スタイル"), items: [{ big: 1, icon: "format_color_fill", label: t("塗りつぶし"), cmd: "fill", drop: 1 }, { big: 1, icon: "border_color", label: t("枠線"), cmd: "line", drop: 1 }, { big: 1, icon: "line_weight", label: t("線の太さ"), cmd: "lineWidth", drop: 1 }, { big: 1, icon: "format_color_text", label: t("文字の色"), cmd: "color", drop: 1 }] },
+        { label: t("グループ"), items: [{ big: 1, icon: "group_work", label: t("グループ化"), cmd: "group" }, { big: 1, icon: "call_split", label: t("グループ解除"), cmd: "ungroup" }] },
         { label: t("配置"), items: [{ stack: [{ icon: "flip_to_front", label: t("最前面へ"), cmd: "order:front" }, { icon: "flip_to_back", label: t("最背面へ"), cmd: "order:back" }, { icon: "rotate_right", label: t("回転"), cmd: "rot90" }] },
           { rows: [[{ icon: "align_horizontal_left", label: t("左揃え"), cmd: "align:l" }, { icon: "align_horizontal_center", label: t("左右中央揃え"), cmd: "align:c" }, { icon: "align_horizontal_right", label: t("右揃え"), cmd: "align:r" }],
             [{ icon: "align_vertical_top", label: t("上揃え"), cmd: "align:t" }, { icon: "align_vertical_center", label: t("上下中央揃え"), cmd: "align:m" }, { icon: "align_vertical_bottom", label: t("下揃え"), cmd: "align:b" }]] }] },
@@ -831,7 +892,7 @@
         if (s.title) out.push({ si: si, get: function () { return s.title; }, set: function (v) { s.title = v; } });
         if (s.sub) out.push({ si: si, get: function () { return s.sub; }, set: function (v) { s.sub = v; } });
         ["items", "items2"].forEach(function (k) { (s[k] || []).forEach(function (x, i) { out.push({ si: si, get: function () { return s[k][i]; }, set: function (v) { s[k][i] = v; } }); }); });
-        (s.objs || []).forEach(function (o) { if (o.html) out.push({ si: si, obj: o.id, get: function () { return plain(o.html); }, set: function (v, q, r, re) { o.html = o.html.replace(re, r); } }); });
+        eachObj(s.objs, function (o) { if (o.html) out.push({ si: si, obj: o.id, get: function () { return plain(o.html); }, set: function (v, q, r, re) { o.html = o.html.replace(re, r); } }); });
         if (s.notes) out.push({ si: si, get: function () { return s.notes; }, set: function (v) { s.notes = v; } });
       });
       return out;
@@ -918,7 +979,7 @@
         var nid;
         function sp(name, x, y, w, h, body, o) {
           o = o || {};
-          var geom = o.geom || "rect", fill = o.fill ? '<a:solidFill><a:srgbClr val="' + o.fill + '"/></a:solidFill>' : "<a:noFill/>", ln = o.line ? '<a:ln w="19050"><a:solidFill><a:srgbClr val="' + o.line + '"/></a:solidFill></a:ln>' : "<a:ln><a:noFill/></a:ln>";
+          var geom = o.geom || "rect", fill = o.fill ? '<a:solidFill><a:srgbClr val="' + o.fill + '"/></a:solidFill>' : "<a:noFill/>", ln = o.line ? '<a:ln w="' + Math.round((o.lw == null ? 1.5 : o.lw) * 12700) + '"><a:solidFill><a:srgbClr val="' + o.line + '"/></a:solidFill></a:ln>' : "<a:ln><a:noFill/></a:ln>";
           nid++;
           return '<p:sp><p:nvSpPr><p:cNvPr id="' + nid + '" name="' + X(name) + " " + nid + '"/><p:cNvSpPr' + (o.box ? ' txBox="1"' : "") + "/><p:nvPr/></p:nvSpPr><p:spPr>" +
             '<a:xfrm' + (o.rot ? ' rot="' + Math.round(o.rot * 60000) + '"' : "") + '><a:off x="' + x + '" y="' + y + '"/><a:ext cx="' + w + '" cy="' + h + '"/></a:xfrm><a:prstGeom prst="' + geom + '"><a:avLst/></a:prstGeom>' + fill + ln + "</p:spPr>" +
@@ -931,6 +992,14 @@
         }
         var GEOM = { rect: "rect", round: "roundRect", ellipse: "ellipse", triangle: "triangle", diamond: "diamond", arrow: "rightArrow", star: "star5", callout: "wedgeRoundRectCallout", line: "line" };
         var slideIds = [], presRels = [], ctypes = [];
+        // ノートは notesSlide（ノートの原稿 notesMaster を 1 つ作り、ノートのあるスライドだけ notesSlide を付ける）
+        var hasNotes = data.slides.some(function (s) { return s.notes && String(s.notes).trim(); });
+        var grpHead = '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>';
+        function notesPh(id, name, type, xfrm, body) {
+          return '<p:sp><p:nvSpPr><p:cNvPr id="' + id + '" name="' + name + '"/><p:cNvSpPr><a:spLocks noGrp="1"' + (type === "sldImg" ? ' noRot="1" noChangeAspect="1"' : "") + "/></p:cNvSpPr>" +
+            '<p:nvPr><p:ph type="' + type + '" idx="' + (type === "sldImg" ? 2 : 1) + '"/></p:nvPr></p:nvSpPr><p:spPr>' + (xfrm ? '<a:xfrm><a:off x="' + xfrm[0] + '" y="' + xfrm[1] + '"/><a:ext cx="' + xfrm[2] + '" cy="' + xfrm[3] + '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' : "") + "</p:spPr>" +
+            (body === undefined ? "" : '<p:txBody><a:bodyPr/><a:lstStyle/>' + body + "</p:txBody>") + "</p:sp>";
+        }
         data.slides.forEach(function (s, n) {
           nid = 1;
           var rels = ['<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'], relN = 1, shapes = [];
@@ -947,25 +1016,53 @@
               shapes.push(sp("Content", emuX(52), emuY(24), emuX(40), emuY(66), paras((s.items2 || []).filter(function (x) { return x; }), { sz: 20, color: ink, bullet: 1 }), { box: 1 }));
             }
           }
-          (s.objs || []).forEach(function (o) {
+          // グループの中の座標（グループの幅・高さに対する %）を、スライド全体の % にする
+          function absChild(c, g) {
+            var a = O.copy(c);
+            a.x = g.x + c.x / 100 * g.w; a.y = g.y + c.y / 100 * g.h;
+            a.w = c.w / 100 * g.w; a.h = c.h / 100 * g.h;
+            return a;
+          }
+          function emitGroup(g) {
+            nid++;
+            var gid = nid, w = Math.max(1, emuX(g.w)), h = Math.max(1, emuY(g.h)), x = emuX(g.x), y = emuY(g.y);
+            return '<p:grpSp><p:nvGrpSpPr><p:cNvPr id="' + gid + '" name="Group ' + gid + '"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
+              '<p:grpSpPr><a:xfrm' + (g.rot ? ' rot="' + Math.round(g.rot * 60000) + '"' : "") + '><a:off x="' + x + '" y="' + y + '"/><a:ext cx="' + w + '" cy="' + h + '"/>' +
+              '<a:chOff x="' + x + '" y="' + y + '"/><a:chExt cx="' + w + '" cy="' + h + '"/></a:xfrm></p:grpSpPr>' +
+              (g.children || []).map(function (c) { return emitObj(absChild(c, g)); }).join("") + "</p:grpSp>";
+          }
+          function emitObj(o) {
+            if (o.type === "group") return emitGroup(o);
             var x = emuX(o.x), y = emuY(o.y), w = Math.max(1, emuX(o.w)), h = Math.max(1, emuY(o.h));
             if (o.type === "image" || o.type === "chart") {
               var src = pngs[o.id] || o.src, d = bytesOf(src);
-              if (!d) return;
+              if (!d) return "";
               var ext = /png/.test(d.mime) ? "png" : /gif/.test(d.mime) ? "gif" : "jpeg";
               media++; mediaExt[ext] = 1;
               var mname = "image" + media + "." + ext;
               files["ppt/media/" + mname] = d.bytes;
               relN++;
               rels.push('<Relationship Id="rId' + relN + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/' + mname + '"/>');
-              shapes.push(pic(o.type === "chart" ? "Chart" : "Picture", x, y, w, h, "rId" + relN, o.rot));
-              return;
+              return pic(o.type === "chart" ? "Chart" : "Picture", x, y, w, h, "rId" + relN, o.rot);
             }
             var lines = plain(o.html).split("\n"), isShape = o.type === "shape";
             var color = hexOf(o.color) || (isShape && o.fill !== "none" ? "FFFFFF" : hexOf(th.ink));
-            shapes.push(sp(isShape ? "Shape" : "TextBox", x, y, w, h, o.shape === "line" ? "" : paras(lines, { sz: o.fs || (isShape ? 18 : 20), b: o.b, i: o.i, u: o.u, color: color, align: o.align || (isShape ? "c" : "l") }),
-              { geom: isShape ? GEOM[o.shape] || "rect" : "rect", fill: isShape && o.shape !== "line" ? (o.fill === "none" ? null : hexOf(o.fill, hexOf(th.accent))) : null, line: o.shape === "line" ? hexOf(o.line, hexOf(th.ink)) : hexOf(o.line), rot: o.rot, va: o.va || (isShape ? "m" : "t"), box: !isShape }));
-          });
+            return sp(isShape ? "Shape" : "TextBox", x, y, w, h, o.shape === "line" ? "" : paras(lines, { sz: o.fs || (isShape ? 18 : 20), b: o.b, i: o.i, u: o.u, color: color, align: o.align || (isShape ? "c" : "l") }),
+              { geom: isShape ? GEOM[o.shape] || "rect" : "rect", fill: isShape && o.shape !== "line" ? (o.fill === "none" ? null : hexOf(o.fill, hexOf(th.accent))) : null, line: o.shape === "line" ? hexOf(o.line, hexOf(th.ink)) : hexOf(o.line), lw: o.shape === "line" && o.lw == null ? 2.25 : o.lw, rot: o.rot, va: o.va || (isShape ? "m" : "t"), box: !isShape });
+          }
+          (s.objs || []).forEach(function (o) { shapes.push(emitObj(o)); });
+          if (s.notes && String(s.notes).trim()) {
+            var nn = "notesSlide" + (n + 1) + ".xml";
+            relN++;
+            rels.push('<Relationship Id="rId' + relN + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/' + nn + '"/>');
+            files["ppt/notesSlides/" + nn] = head + "<p:notes " + NS + "><p:cSld><p:spTree>" + grpHead + notesPh(2, "Slide Image Placeholder 1", "sldImg") +
+              notesPh(3, "Notes Placeholder 2", "body", null, String(s.notes).split("\n").map(function (l) { return "<a:p>" + (l ? '<a:r><a:rPr lang="ja-JP" dirty="0"/><a:t>' + X(l) + "</a:t></a:r>" : "") + '<a:endParaRPr lang="ja-JP" dirty="0"/></a:p>'; }).join("")) +
+              "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:notes>";
+            files["ppt/notesSlides/_rels/" + nn + ".rels"] = head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+              '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="../notesMasters/notesMaster1.xml"/>' +
+              '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide' + (n + 1) + '.xml"/></Relationships>';
+            ctypes.push('<Override PartName="/ppt/notesSlides/' + nn + '" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/>');
+          }
           var trans = s.trans === "fade" ? '<p:transition spd="med"><p:fade/></p:transition>' : s.trans === "push" ? '<p:transition spd="med"><p:push dir="l"/></p:transition>' : s.trans === "zoom" ? '<p:transition spd="med"><p:zoom/></p:transition>' : "";
           files["ppt/slides/slide" + (n + 1) + ".xml"] = head + "<p:sld " + NS + "><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"" + bg + '"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>' +
             '<p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>' + shapes.join("") + "</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>" + trans + "</p:sld>";
@@ -974,11 +1071,12 @@
           presRels.push('<Relationship Id="rId' + (n + 10) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide' + (n + 1) + '.xml"/>');
           ctypes.push('<Override PartName="/ppt/slides/slide' + (n + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>');
         });
-        files["ppt/presentation.xml"] = head + "<p:presentation " + NS + ' saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>' + slideIds.join("") + "</p:sldIdLst>" +
+        files["ppt/presentation.xml"] = head + "<p:presentation " + NS + ' saveSubsetFonts="1"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>' + (hasNotes ? '<p:notesMasterIdLst><p:notesMasterId r:id="rId6"/></p:notesMasterIdLst>' : "") + "<p:sldIdLst>" + slideIds.join("") + "</p:sldIdLst>" +
           '<p:sldSz cx="' + SW + '" cy="' + SH + '"' + (wide ? "" : ' type="screen4x3"') + '/><p:notesSz cx="6858000" cy="9144000"/><p:defaultTextStyle><a:defPPr><a:defRPr lang="ja-JP"/></a:defPPr></p:defaultTextStyle></p:presentation>';
         files["ppt/_rels/presentation.xml.rels"] = head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>' +
           '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/presProps" Target="presProps.xml"/>' +
-          '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/viewProps" Target="viewProps.xml"/><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles" Target="tableStyles.xml"/>' + presRels.join("") + "</Relationships>";
+          '<Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/viewProps" Target="viewProps.xml"/><Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles" Target="tableStyles.xml"/>' +
+          (hasNotes ? '<Relationship Id="rId6" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesMaster" Target="notesMasters/notesMaster1.xml"/>' : "") + presRels.join("") + "</Relationships>";
         files["ppt/presProps.xml"] = head + "<p:presentationPr " + NS + "/>";
         files["ppt/viewProps.xml"] = head + "<p:viewPr " + NS + '><p:normalViewPr><p:restoredLeft sz="15620"/><p:restoredTop sz="94660"/></p:normalViewPr><p:gridSpacing cx="72008" cy="72008"/></p:viewPr>';
         files["ppt/tableStyles.xml"] = head + '<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"/>';
@@ -999,6 +1097,17 @@
           '<a:fontScheme name="SK Hub Office"><a:majorFont><a:latin typeface="Yu Gothic"/><a:ea typeface="Yu Gothic"/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Yu Gothic"/><a:ea typeface="Yu Gothic"/><a:cs typeface=""/></a:minorFont></a:fontScheme>' +
           '<a:fmtScheme name="SK Hub Office"><a:fillStyleLst>' + fill3 + fill3 + fill3 + '</a:fillStyleLst><a:lnStyleLst><a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="12700"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst>' +
           "<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>" + fill3 + fill3 + fill3 + "</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>";
+        if (hasNotes) {
+          // ノートの原稿は、自分のテーマ（theme2.xml。中身はスライドと同じ）を持つ決まり
+          files["ppt/theme/theme2.xml"] = files["ppt/theme/theme1.xml"];
+          files["ppt/notesMasters/notesMaster1.xml"] = head + "<p:notesMaster " + NS + '><p:cSld><p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg><p:spTree>' + grpHead +
+            notesPh(2, "Slide Image Placeholder 1", "sldImg", [1143000, 685800, 4572000, 3429000]) + notesPh(3, "Notes Placeholder 2", "body", [685800, 4400550, 5486400, 4114800], '<a:p><a:endParaRPr lang="ja-JP"/></a:p>') +
+            "</p:spTree></p:cSld>" + '<p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>' +
+            '<p:notesStyle><a:lvl1pPr marL="0" algn="l"><a:defRPr sz="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:notesStyle></p:notesMaster>';
+          files["ppt/notesMasters/_rels/notesMaster1.xml.rels"] = head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme2.xml"/></Relationships>';
+          ctypes.push('<Override PartName="/ppt/notesMasters/notesMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesMaster+xml"/>',
+            '<Override PartName="/ppt/theme/theme2.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>');
+        }
         files["_rels/.rels"] = head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>' +
           '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
         files["docProps/core.xml"] = head + '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
@@ -1016,6 +1125,230 @@
         return files;
       });
     }
+    // ---------- PptxGenJS で、グラフも PowerPoint のグラフのまま書き出す ----------
+    //   いまの pptxFiles は、グラフを画像にしている。こちらはグラフを本物のグラフ（c:chart）にする。
+    //   PptxGenJS にはグループを作る機能がないので、グループは中身をスライド全体の位置に直して並べる。
+    function loadPptxGenJS() {
+      if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
+      return O.loadVendor("pptxgen.bundle.js").then(function () {
+        if (!window.PptxGenJS) throw new Error("vendor-missing: pptxgen.bundle.js");
+        return window.PptxGenJS;
+      });
+    }
+    function pptxBytes() {
+      return loadPptxGenJS().then(function (PptxGenJS) {
+        var wide = data.ratio !== "4:3", SWin = wide ? 13.333 : 10, SHin = 7.5;
+        var pptx = new PptxGenJS();
+        pptx.layout = wide ? "LAYOUT_WIDE" : "LAYOUT_4x3";
+        pptx.author = O.userName() || "SK Hub Office";
+        pptx.company = "SK Hub";
+        pptx.subject = t("SK Hub Office で作成");
+        pptx.title = O.fileName("").replace(/\.[^.]+$/, "") || "SK Hub Office";
+        pptx.lang = "ja-JP";
+        var th = THEMES[themeOf(data)];
+        function X(p) { return Math.max(0, Math.min(100, +p || 0)) / 100 * SWin; }
+        function Y(p) { return Math.max(0, Math.min(100, +p || 0)) / 100 * SHin; }
+        function hx(c, fallback) { return hexOf(c, fallback) || null; }
+        function color(c, fallback) { var x = hx(c, fallback); return x || "000000"; }
+        function textColor(o, shapeFill) {
+          if (o.color) return color(o.color, th.ink);
+          if (shapeFill && shapeFill !== "none") return "FFFFFF";
+          return color(th.ink);
+        }
+        function objFont(o) { return Math.max(6, Math.min(96, +o.fs || (o.type === "shape" ? 18 : 20))); }
+        function textOpts(o, col, fill) {
+          var a = { x: X(o.x), y: Y(o.y), w: Math.max(0.05, X(o.w)), h: Math.max(0.05, Y(o.h)),
+            fontFace: "Yu Gothic", fontSize: objFont(o), color: col, bold: !!o.b, italic: !!o.i,
+            underline: o.u ? { style: "sng" } : undefined, margin: 0, breakLine: false, fit: "shrink",
+            align: { l: "left", c: "center", r: "right" }[o.align || "l"],
+            valign: { t: "top", m: "middle", b: "bottom" }[o.va || "t"], rotate: +o.rot || 0 };
+          if (fill) a.fill = { color: fill };
+          if (o.line && o.line !== "none") a.line = { color: color(o.line), width: Math.max(0.25, +o.lw || 1.5) };
+          return a;
+        }
+        // 画像は data:image/png/jpeg/gif 以外（SVG・https の画像）を PNG に直しておく
+        var imgJobs = [];
+        function imageFor(o) {
+          if (!o.src) return Promise.resolve(null);
+          if (/^data:image\/(png|jpe?g|gif)/i.test(o.src)) return Promise.resolve(o.src);
+          var w = Math.max(80, Math.round(o.w * 9.6)), h = Math.max(60, Math.round(o.h * 9.6 / ratio(data)));
+          return svgPng('<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '"><image href="' + esc(o.src) + '" width="' + w + '" height="' + h + '" preserveAspectRatio="xMidYMid meet"/></svg>', w, h);
+        }
+        function eachFlat(list, fn, gx, gy, gw, gh) {
+          (list || []).forEach(function (o) {
+            var a = o;
+            if (gx !== undefined) {
+              a = O.copy(o);
+              a.x = gx + o.x / 100 * gw; a.y = gy + o.y / 100 * gh;
+              a.w = o.w / 100 * gw; a.h = o.h / 100 * gh;
+            }
+            if (a.type === "group") eachFlat(a.children, fn, a.x, a.y, a.w, a.h);
+            else fn(a);
+          });
+        }
+        data.slides.forEach(function (s, n) {
+          (s.objs || []).forEach(function (o) {
+            if (o.type === "image" && o.src && !/^data:image\/(png|jpe?g|gif)/i.test(o.src)) imgJobs.push(imageFor(o).then(function (v) { o.__png = v; }));
+            else if (o.type === "group") eachFlat(o.children, function (c) {
+              if (c.type === "image" && c.src && !/^data:image\/(png|jpe?g|gif)/i.test(c.src)) imgJobs.push(imageFor(c).then(function (v) { c.__png = v; }));
+            }, o.x, o.y, o.w, o.h);
+          });
+        });
+        return Promise.all(imgJobs).then(function () {
+          var SHAPES = { rect: "rect", round: "roundRect", ellipse: "ellipse", triangle: "triangle", diamond: "diamond", arrow: "rightArrow", star: "star5", callout: "wedgeRoundRectCallout", line: "line" };
+          var CHART = { col: "bar", bar: "bar", line: "line", area: "area", pie: "pie", scatter: "scatter" };
+          function addText(slide, text, opt, shape, fill) {
+            if (shape) {
+              var sh = { x: opt.x, y: opt.y, w: opt.w, h: opt.h, rotate: opt.rotate, fill: fill ? { color: fill } : { color: "FFFFFF", transparency: 100 } };
+              if (opt.line) sh.line = opt.line;
+              slide.addText(text || "", Object.assign({}, opt, { shape: shape, fill: sh.fill, line: sh.line }));
+            } else slide.addText(text || "", opt);
+          }
+          function addObj(slide, o) {
+            var fill = o.type === "shape" && o.shape !== "line" ? color(o.fill, th.accent) : null;
+            if (o.type === "image") {
+              var src = o.__png || o.src;
+              if (!src) return;
+              var ip = { data: src, x: X(o.x), y: Y(o.y), w: Math.max(0.05, X(o.w)), h: Math.max(0.05, Y(o.h)), rotate: +o.rot || 0 };
+              try { slide.addImage(ip); } catch (e) {}
+              return;
+            }
+            if (o.type === "chart") {
+              var spec = o.spec || {}, series = (spec.series || []).slice(0, 8);
+              var ctype = CHART[spec.type] || "bar";
+              var cdata = series.map(function (sr) {
+                return { name: String(sr.name || ""), labels: (spec.cats || []).map(String), values: (sr.values || []).map(function (v) { return v === null || v === undefined || isNaN(+v) ? 0 : +v; }) };
+              });
+              if (!cdata.length) return;
+              var leg = spec.legend !== false && (spec.type === "pie" ? (spec.cats || []).length > 0 : series.length > 1);
+              var co = { x: X(o.x), y: Y(o.y), w: Math.max(0.1, X(o.w)), h: Math.max(0.1, Y(o.h)),
+                showLegend: leg, showTitle: !!spec.title, title: String(spec.title || ""), titleFontSize: 12, titleColor: color(th.ink),
+                chartColors: (Chart.colors || []).map(function (c) { return String(c).replace(/^#/, ""); }),
+                legendPos: "b", legendColor: color(th.sub), legendFontSize: 10,
+                catAxisLabelColor: color(th.sub), valAxisLabelColor: color(th.sub), catAxisLabelFontSize: 10, valAxisLabelFontSize: 10,
+                border: { color: color(th.grid, "#e1e0d9"), pt: 0.75 }, fill: color(th.bg, "#ffffff") };
+              if (ctype === "bar") co.barDir = spec.type === "bar" ? "bar" : "col";
+              if (spec.type === "pie") { co.showValue = true; co.dataLabelColor = "FFFFFF"; co.dataLabelFontSize = 10; }
+              try { slide.addChart(ctype, cdata, co); } catch (e) {}
+              return;
+            }
+            var lines = plain(o.html);
+            if (o.type === "shape") {
+              if (o.shape === "line") {
+                try {
+                  slide.addShape("line", { x: X(o.x), y: Y(o.y) + Y(o.h) / 2, w: Math.max(0.05, X(o.w)), h: 0,
+                    line: { color: color(o.line, th.ink), width: Math.max(0.25, +o.lw || 1.5) }, rotate: +o.rot || 0 });
+                } catch (e) {}
+                return;
+              }
+              addText(slide, lines, textOpts(o, textColor(o, o.fill), null), SHAPES[o.shape] || "rect", fill);
+            } else addText(slide, lines, textOpts(o, textColor(o, null), null), null, null);
+          }
+          data.slides.forEach(function (s, n) {
+            var lay = s.layout || "title", sec = lay === "section";
+            var bg = hx(s.bg) || hx(sec ? th.sec : th.bg, "#ffffff");
+            var slide = pptx.addSlide();
+            slide.background = { color: bg };
+            var ink = color(sec ? th.secInk : th.ink), sub = color(sec ? th.secInk : th.sub), isCenter = sec;
+            function tOpt(size, bold, col, align) {
+              return { x: X(8), w: X(84), fontFace: "Yu Gothic", fontSize: size, color: col, bold: !!bold,
+                align: align || (isCenter ? "center" : "left"), valign: "middle", margin: 0, fit: "shrink", breakLine: false };
+            }
+            if (lay === "title" || lay === "section") {
+              if (s.title) { var a = tOpt(44, true, ink); a.y = Y(sec ? 34 : 28); a.h = Y(20); slide.addText(String(s.title), a); }
+              if (s.sub) { var b = tOpt(20, false, sub); b.y = Y(sec ? 56 : 52); b.h = Y(14); slide.addText(String(s.sub), b); }
+            } else if (lay !== "blank") {
+              if (s.title) { var c = tOpt(32, true, ink); c.y = Y(6); c.h = Y(14); c.valign = "middle"; slide.addText(String(s.title), c); }
+              function bullets(items, x, w) {
+                var list = (items || []).filter(function (x) { return x; });
+                if (!list.length) return;
+                var body = { x: X(x), y: Y(24), w: X(w), h: Y(66), fontFace: "Yu Gothic", fontSize: 22, color: ink, margin: 0,
+                  valign: "top", align: "left", fit: "shrink", breakLine: true };
+                slide.addText(list.map(function (x) { return { text: String(x), options: { bullet: true, breakLine: true } }; }), body);
+              }
+              if (lay === "bullets") bullets(s.items, 8, 84);
+              else if (lay === "two") { bullets(s.items, 8, 40); bullets(s.items2, 52, 40); }
+            }
+            eachFlat(s.objs || [], function (o) { addObj(slide, o); }, undefined, undefined, undefined, undefined);
+            if (s.notes && String(s.notes).trim()) slide.addNotes(String(s.notes));
+          });
+          return pptx.write({ outputType: "arraybuffer" });
+        }).then(function (buf) {
+          return Zip.read(buf).then(function (z) {
+            // PptxGenJS 4.0.1 は、スライドの数だけ slideMaster2… を [Content_Types].xml に書くが、
+            // 実際には slideMaster1 しか作らない。あるファイルだけを残す（PowerPoint の「修復」を避ける）。
+            var ct = Zip.text(z["[Content_Types].xml"]);
+            ct = ct.replace(/<Override\b[^>]*PartName="([^"]+)"[^>]*\/>/g, function (all, p) {
+              return z[p.replace(/^\//, "")] ? all : "";
+            });
+            z["[Content_Types].xml"] = ct;
+            // notesMasterIdLst は sldIdLst より前に置く（ECMA-376 の順番）
+            var pres = Zip.text(z["ppt/presentation.xml"]), nm = /<p:notesMasterIdLst>[\s\S]*?<\/p:notesMasterIdLst>/.exec(pres);
+            if (nm && pres.indexOf(nm[0]) > pres.indexOf("<p:sldIdLst>")) {
+              pres = pres.replace(nm[0], "").replace(/(<p:sldIdLst>)/, nm[0] + "$1");
+              z["ppt/presentation.xml"] = pres;
+            }
+            var out = {}, first = z["[Content_Types].xml"];
+            if (first) out["[Content_Types].xml"] = first;
+            Object.keys(z).forEach(function (k) { if (k !== "[Content_Types].xml") out[k] = z[k]; });
+            // PptxGenJS は画面切り替えを書かないので、XML に足す
+            data.slides.forEach(function (s, i) {
+              var p = "ppt/slides/slide" + (i + 1) + ".xml";
+              if (!out[p] || !s.trans || s.trans === "none") return;
+              var xml = Zip.text(out[p]);
+              var tag = s.trans === "fade" ? '<p:transition spd="med"><p:fade/></p:transition>' :
+                s.trans === "push" ? '<p:transition spd="med"><p:push dir="l"/></p:transition>' :
+                s.trans === "zoom" ? '<p:transition spd="med"><p:zoom/></p:transition>' : "";
+              if (tag) out[p] = xml.replace(/<\/p:sld>\s*$/, tag + "</p:sld>");
+            });
+            return Zip.write(out);
+          });
+        });
+      });
+    }
+    function previewPptx() {
+      pptxBytes().then(function (blob) {
+        var body = document.createElement("div");
+        body.className = "pptx-prev";
+        body.innerHTML = '<canvas id="pptx-prev-canvas" aria-label="' + esc(t("プレビュー")) + '"></canvas>' +
+          '<div class="pptx-prev__bar"><button type="button" class="text-btn m3-state" data-pv="prev" aria-label="' + esc(t("前のスライド")) + '">‹</button>' +
+          '<span id="pptx-prev-no">1 / 1</span><button type="button" class="text-btn m3-state" data-pv="next" aria-label="' + esc(t("次のスライド")) + '">›</button></div>' +
+          '<p class="dlg-note">' + esc(t("書き出す前の見た目です。グラフや SmartArt は、アプリとは少しちがって見えることがあります。")) + "</p>";
+        var renderer = null, index = 0, destroyed = false;
+        function show() {
+          if (!renderer) return;
+          var cv = body.querySelector("#pptx-prev-canvas");
+          renderer.renderSlide(index, cv, Math.max(480, Math.min(1100, body.clientWidth || 900)));
+          body.querySelector("#pptx-prev-no").textContent = (index + 1) + " / " + renderer.slideCount;
+          body.querySelector('[data-pv="prev"]').disabled = index <= 0;
+          body.querySelector('[data-pv="next"]').disabled = index >= renderer.slideCount - 1;
+        }
+        body.querySelector('[data-pv="prev"]').addEventListener("click", function () { if (index > 0) { index--; show(); } });
+        body.querySelector('[data-pv="next"]').addEventListener("click", function () { if (renderer && index < renderer.slideCount - 1) { index++; show(); } });
+        return M3.dialog({ title: t("スライドのプレビュー"), icon: "slideshow", body: body, autofocus: false,
+          actions: [{ label: t("閉じる"), value: null, primary: true }],
+          onReady: function () {
+            var cv = body.querySelector("#pptx-prev-canvas");
+            cv.textContent = t("読み込んでいます…");
+            O.loadVendor("pptx-browser.umd.js").then(function () {
+              if (!window.PptxCanvasRenderer) throw new Error("vendor-missing: pptx-browser.umd.js");
+              renderer = new window.PptxCanvasRenderer.PptxRenderer();
+              return renderer.load(blob);
+            }).then(function () { if (!destroyed) show(); }).catch(function (e) {
+              if (e && window.console) console.error(e);
+              body.insertAdjacentHTML("afterbegin", '<p class="dlg-note">' + esc(t("プレビューを表示できませんでした。")) + "</p>");
+            });
+          }
+        }).then(function () {
+          destroyed = true;
+          if (renderer) { renderer.destroy(); renderer = null; }
+        });
+      }).catch(function (e) {
+        if (e && window.console) console.error(e);
+        O.notify(t("プレビューを表示できませんでした"));
+      });
+      return Promise.resolve(false);
+    }
     function exportAs(id) {
       endObjEdit();
       if (id === "pptx") {
@@ -1024,12 +1357,19 @@
           return O.saveBlob(O.fileName(".pptx"), new Blob([b], { type: mime }), t("PowerPoint プレゼンテーション"), mime, ".pptx");
         });
       }
+      if (id === "pptx-native") {
+        return pptxBytes().then(function (b) {
+          var mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+          return O.saveBlob(O.fileName(".pptx"), new Blob([b], { type: mime }), t("PowerPoint プレゼンテーション（グラフ付き）"), mime, ".pptx");
+        });
+      }
+      if (id === "pptx-preview") return previewPptx();
       if (id === "outline") {
         var text = data.slides.map(function (s, i) {
           var lines = [(i + 1) + ". " + (s.title || "")];
           if (s.sub) lines.push("   " + s.sub);
           (s.items || []).concat(s.items2 || []).forEach(function (x) { if (x) lines.push("   ・" + x); });
-          (s.objs || []).forEach(function (o) { var p = plain(o.html); if (p) lines.push("   " + p.replace(/\n/g, " ")); });
+          (s.objs || []).forEach(function (o) { eachObj([o], function (k) { var p = plain(k.html); if (p) lines.push("   " + p.replace(/\n/g, " ")); }); });
           if (s.notes) lines.push("   " + t("ノート") + ": " + s.notes.replace(/\n/g, " "));
           return lines.join("\r\n");
         }).join("\r\n\r\n");
@@ -1057,39 +1397,77 @@
           var relPath = path.replace(/slides\/(slide\d+\.xml)$/, "slides/_rels/$1.rels"), srel = {};
           kids(Zip.xml(z[relPath]), "Relationship").forEach(function (r) { srel[r.getAttribute("Id")] = { target: r.getAttribute("Target"), type: r.getAttribute("Type") || "" }; });
           var s = { layout: "blank", objs: [] }, bodyItems = null;
-          function geo(node) {
-            var off = kids(node, "off")[0], ext = kids(node, "ext")[0], xf = kids(node, "xfrm")[0];
+          // xfrm（場所・大きさ）を、space（親の座標）に対する % で読む。グループの中は、グループの幅・高さに対する %
+          function xfrmOf(node) {
+            var xf = kids(node, "xfrm")[0], off = xf && kid(xf, "off"), ext = xf && kid(xf, "ext");
             if (!off || !ext) return null;
-            var rot = xf && xf.getAttribute("rot") ? Math.round(+xf.getAttribute("rot") / 60000) : 0;
-            return { x: +off.getAttribute("x") / SW * 100, y: +off.getAttribute("y") / SH * 100, w: +ext.getAttribute("cx") / SW * 100, h: +ext.getAttribute("cy") / SH * 100, rot: rot || undefined };
+            return { xf: xf, off: off, ext: ext, chOff: kid(xf, "chOff"), chExt: kid(xf, "chExt") };
+          }
+          function coords(node, space) {
+            var f = xfrmOf(node);
+            if (!f) return null;
+            var rot = f.xf.getAttribute("rot") ? Math.round(+f.xf.getAttribute("rot") / 60000) : 0;
+            return { x: (+f.off.getAttribute("x") - space.x0) / space.w * 100, y: (+f.off.getAttribute("y") - space.y0) / space.h * 100,
+              w: +f.ext.getAttribute("cx") / space.w * 100, h: +f.ext.getAttribute("cy") / space.h * 100, rot: rot || undefined, f: f };
+          }
+          function childSpace(g) {
+            var f = g.f;
+            return { x0: f.chOff ? +f.chOff.getAttribute("x") : +f.off.getAttribute("x"), y0: f.chOff ? +f.chOff.getAttribute("y") : +f.off.getAttribute("y"),
+              w: f.chExt ? +f.chExt.getAttribute("cx") || 1 : +f.ext.getAttribute("cx"), h: f.chExt ? +f.chExt.getAttribute("cy") || 1 : +f.ext.getAttribute("cy") };
           }
           function parasOf(sp) { return kids(sp, "p").map(function (p) { return kids(p, "t").map(function (x) { return x.textContent; }).join(""); }); }
-          kids(doc, "sp").forEach(function (sp) {
-            var ph = kids(sp, "ph")[0], type = ph ? ph.getAttribute("type") || "body" : null, lines = parasOf(sp), text = lines.join("\n").trim();
-            if (type === "title" || type === "ctrTitle") { s.title = text; if (type === "ctrTitle") s.layout = "title"; else if (s.layout === "blank") s.layout = "titleOnly"; return; }
-            if (type === "subTitle") { s.sub = text; s.layout = "title"; return; }
-            if ((type === "body" || type === "obj") && !bodyItems) { bodyItems = lines.filter(function (x) { return x.trim(); }); return; }
-            var g = geo(sp);
-            if (!g || (!text && !kids(sp, "prstGeom").length)) return;
-            var prst = kids(sp, "prstGeom")[0], geom = prst ? prst.getAttribute("prst") : "rect", isText = !!kids(sp, "cNvSpPr").filter(function (x) { return x.getAttribute("txBox") === "1"; }).length || geom === "rect" && !kids(kid(kids(sp, "spPr")[0], "solidFill") || null, "srgbClr").length;
+          function objFromSp(sp, space) {
+            var lines = parasOf(sp), text = lines.join("\n").trim(), g = coords(sp, space);
+            if (!g || (!text && !kids(sp, "prstGeom").length)) return null;
+            var prst = kids(sp, "prstGeom")[0], geom = prst ? prst.getAttribute("prst") : "rect", spPr = kids(sp, "spPr")[0];
+            var isText = !!kids(sp, "cNvSpPr").filter(function (x) { return x.getAttribute("txBox") === "1"; }).length || geom === "rect" && !kids(kid(spPr, "solidFill") || null, "srgbClr").length;
             var rpr = kids(sp, "rPr")[0], fsz = rpr && rpr.getAttribute("sz") ? +rpr.getAttribute("sz") / 100 : null;
-            var fillEl = kid(kids(sp, "spPr")[0], "solidFill"), fill = fillEl && kids(fillEl, "srgbClr")[0] ? "#" + kids(fillEl, "srgbClr")[0].getAttribute("val").toLowerCase() : null;
+            var fillEl = kid(spPr, "solidFill"), fill = fillEl && kids(fillEl, "srgbClr")[0] ? "#" + kids(fillEl, "srgbClr")[0].getAttribute("val").toLowerCase() : null;
             var colEl = rpr && kids(rpr, "srgbClr")[0], color = colEl ? "#" + colEl.getAttribute("val").toLowerCase() : null;
+            var lnEl = kid(spPr, "ln"), lnFill = kid(lnEl, "solidFill"), lnCol = lnFill && kids(lnFill, "srgbClr")[0];
             var shapeMap = { roundRect: "round", ellipse: "ellipse", triangle: "triangle", diamond: "diamond", rightArrow: "arrow", star5: "star", wedgeRoundRectCallout: "callout", wedgeRectCallout: "callout", line: "line" };
             var o = { id: uid(), type: isText ? "text" : "shape", x: g.x, y: g.y, w: g.w, h: g.h, rot: g.rot, html: lines.map(esc).join("<br>"), fs: fsz || undefined, color: color || undefined };
-            if (!isText) { o.shape = shapeMap[geom] || "rect"; o.fill = fill || undefined; }
+            if (!isText) {
+              o.shape = shapeMap[geom] || "rect"; o.fill = fill || undefined;
+              if (lnCol) o.line = "#" + lnCol.getAttribute("val").toLowerCase();
+              if (lnEl && lnEl.getAttribute("w")) { var lw = +lnEl.getAttribute("w") / 12700; if (lw > 0) o.lw = Math.round(lw * 100) / 100; }
+            }
             if (rpr && rpr.getAttribute("b") === "1") o.b = 1;
-            s.objs.push(o);
-          });
-          kids(doc, "pic").forEach(function (p) {
-            var blip = kids(p, "blip")[0], id = blip && (blip.getAttributeNS(RNS, "embed") || blip.getAttribute("r:embed")), r = id && srel[id], g = geo(p);
-            if (!r || !g) return;
+            return o;
+          }
+          function objFromPic(p, space) {
+            var blip = kids(p, "blip")[0], id = blip && (blip.getAttributeNS(RNS, "embed") || blip.getAttribute("r:embed")), r = id && srel[id], g = coords(p, space);
+            if (!r || !g) return null;
             var mp = "ppt/" + r.target.replace(/^\.\.\//, "").replace(/^\/?ppt\//, ""), bytes = z[mp];
-            if (!bytes) return;
+            if (!bytes) return null;
             var ext = (mp.split(".").pop() || "png").toLowerCase();
-            if (/emf|wmf|tif/.test(ext)) return;
-            s.objs.push({ id: uid(), type: "image", src: "data:image/" + (ext === "jpg" ? "jpeg" : ext === "svg" ? "svg+xml" : ext) + ";base64," + b64(bytes), x: g.x, y: g.y, w: g.w, h: g.h, rot: g.rot });
-          });
+            if (/emf|wmf|tif/.test(ext)) return null;
+            return { id: uid(), type: "image", src: "data:image/" + (ext === "jpg" ? "jpeg" : ext === "svg" ? "svg+xml" : ext) + ";base64," + b64(bytes), x: g.x, y: g.y, w: g.w, h: g.h, rot: g.rot };
+          }
+          function readShapes(host, space, top) {
+            var out = [];
+            Array.prototype.slice.call(host.children).forEach(function (c) {
+              if (c.localName === "sp") {
+                var ph = kids(c, "ph")[0], type = ph ? ph.getAttribute("type") || "body" : null, lines = parasOf(c), text = lines.join("\n").trim();
+                if (top && (type === "title" || type === "ctrTitle")) { s.title = text; if (type === "ctrTitle") s.layout = "title"; else if (s.layout === "blank") s.layout = "titleOnly"; return; }
+                if (top && type === "subTitle") { s.sub = text; s.layout = "title"; return; }
+                if (top && (type === "body" || type === "obj") && !bodyItems) { bodyItems = lines.filter(function (x) { return x.trim(); }); return; }
+                var o = objFromSp(c, space);
+                if (o) out.push(o);
+              } else if (c.localName === "pic") {
+                var p = objFromPic(c, space);
+                if (p) out.push(p);
+              } else if (c.localName === "grpSp") {
+                var g = coords(c, space);
+                if (!g) return;
+                var inner = readShapes(c, childSpace(g), false);
+                if (inner.length) out.push({ id: uid(), type: "group", x: g.x, y: g.y, w: g.w, h: g.h, rot: g.rot, children: inner });
+              }
+            });
+            return out;
+          }
+          var tree = kids(doc, "spTree")[0];
+          s.objs = tree ? readShapes(tree, { x0: 0, y0: 0, w: SW, h: SH }, true) : [];
           if (bodyItems) { s.items = bodyItems.length ? bodyItems : [""]; s.layout = "bullets"; if (!s.title) s.title = ""; }
           // ノート
           Object.keys(srel).forEach(function (id) {
@@ -1169,6 +1547,8 @@
       afterPrint: afterPrint,
       exports: [
         { id: "pptx", icon: "slideshow", label: t("PowerPoint（.pptx）"), desc: t("Microsoft PowerPoint・LibreOffice・Google スライドで開けます") },
+        { id: "pptx-native", icon: "bar_chart", label: t("PowerPoint（グラフ付き .pptx）"), desc: t("グラフを PowerPoint のグラフとして入れます。グループは分解されます") },
+        { id: "pptx-preview", icon: "preview", label: t("スライドのプレビュー"), preview: true, desc: t("書き出す前の見た目を確かめます。ファイルは保存しません") },
         { id: "outline", icon: "format_list_bulleted", label: t("アウトライン（.txt）"), desc: t("スライドの文字とノートを書き出します") }
       ],
       exportAs: exportAs,

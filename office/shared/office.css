@@ -550,6 +550,8 @@ h1, h2, h3, p { margin: 0; }
 .doc-page hr { border: 0; border-top: 1px solid #c3c6d7; margin: 20px 0; }
 .doc-page table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 15px; }
 .doc-page th, .doc-page td { border: 1px solid #d5d6dc; padding: 8px 12px; text-align: left; vertical-align: top; min-width: 3em; }
+/* 罫線を自分で設定した表（data-bd）。罫線はセルの inline style で書く */
+.doc-page table[data-bd] th, .doc-page table[data-bd] td { border: 0; }
 .doc-page th { background: #eef0f6; font-weight: 700; width: 9em; }
 .doc-page .meta { color: #5a5f6b; font-size: 14px; }
 .doc-page .right { text-align: right; }
@@ -660,6 +662,8 @@ h1, h2, h3, p { margin: 0; }
 .grid-scroll .grid td.is-c { text-align: center; }
 .grid-scroll .grid td.is-r { text-align: right; }
 .grid-scroll .grid tr.is-hide { display: none; }
+/* 作っていない行の場所をとる空の行（sheet.js の renderWindow）。高さは tr の style で決める */
+.grid-scroll .grid tr.vpad td { height: auto; padding: 0; border: 0; line-height: 0; font-size: 0; cursor: default; }
 /* 表（sheet.js）。列の幅は colgroup で決める。選んだところの枠・入力の欄・グラフは .grid-wrap の上に重ねる */
 .grid-wrap { position: relative; display: inline-block; min-width: 100%; vertical-align: top; }
 /* 重なりの順: セル → グラフ(2) → 固定したセル・選んだ枠(4) → 行の見出し(5) → 列の見出し(6) → 入力中の欄(8) */
@@ -678,6 +682,10 @@ h1, h2, h3, p { margin: 0; }
 .grid-scroll .grid td.is-s { text-decoration: line-through; }
 .grid-scroll .grid td.is-us { text-decoration: underline line-through; }
 .grid-scroll .grid td.is-err { color: var(--md-error); text-align: center; }
+/* 入力規則に合わない値（インポート・貼り付けで入ったもの） */
+.grid-scroll .grid td.is-invalid::before { content: ""; position: absolute; inset: 0; border: 2px dashed #c62828; pointer-events: none; z-index: 1; }
+/* セルのコメントの印（右上の赤い三角） */
+.grid-scroll .grid td .cmt-mark { position: absolute; top: 0; right: 0; width: 0; height: 0; border-top: 6px solid #d93025; border-left: 6px solid transparent; cursor: help; z-index: 2; }
 .grid-scroll .grid td.is-wrap { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 20px; padding-top: 3px; padding-bottom: 3px; }
 .grid-scroll .grid td.va-t { vertical-align: top; }
 .grid-scroll .grid td.va-m { vertical-align: middle; }
@@ -747,6 +755,7 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
 .deck-no__fx { display: block; margin: 2px 0 0 auto; font-size: 13px; color: var(--md-primary); }
 /* 自由に置くもの（文字・図形・画像・グラフ） */
 .sl-obj { position: absolute; box-sizing: border-box; }
+.sl-obj--group > .sl-obj { pointer-events: none; }
 .sl-obj > img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .sl-obj--chart svg { display: block; width: 100%; height: 100%; }
 .sl-shape { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -1035,9 +1044,21 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
   height: 36px; padding: 0 10px; border: 0; border-radius: 6px; background: var(--md-surface-container-highest); color: var(--md-on-surface); font: 14px var(--md-font);
 }
 .dlg-area { width: 100%; height: 180px; padding: 8px 10px; resize: vertical; font-family: ui-monospace, Consolas, monospace; font-size: 13px; line-height: 1.5; }
+/* セルのコメントの入力欄（大きな文字で） */
+.dlg-area--note { height: 120px; margin-top: 10px; font-family: var(--md-font); font-size: 14px; line-height: 1.6; }
 .dlg-note { font-size: 12.5px; color: var(--md-on-surface-variant); margin-top: 8px; line-height: 18px; }
+/* スライドのプレビュー（PptxGenJS で作った .pptx を pptx-browser で描く） */
+.pptx-prev { width: min(1040px, 86vw); }
+.pptx-prev canvas { display: block; width: 100%; height: auto; border-radius: 10px; background: #fff; box-shadow: 0 2px 10px color-mix(in srgb, var(--md-inverse-surface) 18%, transparent); }
+.pptx-prev__bar { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 10px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.pptx-prev__bar .text-btn { min-width: 36px; font-size: 22px; line-height: 1; }
+.pptx-prev__bar .text-btn:disabled { opacity: .35; }
 .dlg-stats { display: grid; grid-template-columns: 1fr auto; gap: 8px 32px; min-width: 260px; font-size: 14px; }
 .dlg-stats dd { margin: 0; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
+/* カスタムスタイルの一覧（ダイアログの中） */
+.cst-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--md-outline-variant); }
+.cst-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 500; }
+.cst-row__base { font-size: 12px; color: var(--md-on-surface-variant); white-space: nowrap; }
 .keys {
   position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px;
   background: color-mix(in srgb, var(--md-inverse-surface) 32%, transparent);

@@ -2,9 +2,12 @@
 //   ファイルの中身（data）: { v: 2, cur: 開いているシートの番号, sheets: [シート] }
 //     シート: { name, cells: { "A1": "入れた文字（= で始まると数式）" }, style: { "A1": 書式 }, cw: { 列の番号: 幅 px }, rh: { 行の番号: 高さ px },
 //              merges: ["A1:C1"], freeze: { r: 固定する行の数, c: 固定する列の数 }, head: 見出しの行, total: 合計の行, grid: false（目盛り線を消す）,
-//              filter: { r: 見出しの行, c1, c2, hide: { 列の番号: [隠す文字] } }, cf: [条件付き書式], charts: [{ id, type, ref, title, x, y, w, h }] }
+//              filter: { r: 見出しの行, c1, c2, hide: { 列の番号: [隠す文字] } }, cf: [条件付き書式], charts: [{ id, type, ref, title, x, y, w, h }],
+//              dv: [入力規則], notes: { "A1": { text, author, ts }（セルのコメント） } }
 //     書式: { b, i, u, s（取り消し線）, ff（フォント）, fs（大きさ pt）, fg（文字の色）, bg（塗りつぶし）, al: "l|c|r", va: "t|m|b", wrap, nf（表示形式）, bd: { t, r, b, l } }
 //     条件付き書式: { ref: "B2:B9", type: "gt|lt|eq|text|dup|bar|scale", v, color }
+//     入力規則: { ref: "B2:B9", type: "list|whole|decimal|date|textLength|custom", op: "between|notBetween|equal|notEqual|greaterThan|lessThan|greaterThanOrEqual|lessThanOrEqual",
+//                 f1（値・最小値・リストの元の値）, f2（最大値）, allowBlank, promptTitle, prompt, errTitle, err, style: "stop|warning|information" }
 //   0.1 の形（{ cells, fmt: { C: "yen" }, head, total }）は upgrade で 2 の形に直す
 //   画面: 数式バー → 表（見えている分だけ作り、下へスクロールすると足す）→ シートのタブ。選んだところの枠・入力の欄・グラフは表の上に重ねる
 //   入力の欄（#ced）は、選んだセルの上にいつも置いておき、文字を打つとそのまま入力になる（日本語の入力もそのまま使える）
@@ -32,6 +35,7 @@
       s.name = s.name || "Sheet" + (i + 1);
       s.cells = s.cells || {}; s.style = s.style || {}; s.cw = s.cw || {}; s.rh = s.rh || {};
       s.merges = s.merges || []; s.charts = s.charts || []; s.cf = s.cf || [];
+      s.dv = s.dv || []; s.notes = s.notes || {};
       return s;
     }
     function upgrade(d) {
@@ -143,6 +147,93 @@
       return a.join(",");
     }
 
+    // ---------- 入力規則（data.dv） ----------
+    //   { ref, type: "list|whole|decimal|date|textLength|custom", op, f1, f2, allowBlank,
+    //     promptTitle, prompt, errTitle, err, style: "stop|warning|information" }
+    var DV_TYPES = [
+      { v: "list", label: t("リスト") }, { v: "whole", label: t("整数") }, { v: "decimal", label: t("小数") },
+      { v: "date", label: t("日付") }, { v: "textLength", label: t("文字の長さ") }, { v: "custom", label: t("ユーザー設定（数式）") }
+    ];
+    var DV_OPS = [
+      { v: "between", label: t("次の値の間") }, { v: "notBetween", label: t("次の値の間以外") },
+      { v: "equal", label: t("次の値に等しい") }, { v: "notEqual", label: t("次の値に等しくない") },
+      { v: "greaterThan", label: t("次の値より大きい") }, { v: "lessThan", label: t("次の値より小さい") },
+      { v: "greaterThanOrEqual", label: t("次の値以上") }, { v: "lessThanOrEqual", label: t("次の値以下") }
+    ];
+    var DV_STYLES = [{ v: "stop", label: t("停止") }, { v: "warning", label: t("警告") }, { v: "information", label: t("情報") }];
+    function dvEmpty() { return { ref: "", type: "list", op: "between", f1: "", f2: "", allowBlank: true, promptTitle: "", prompt: "", errTitle: "", err: "", style: "stop" }; }
+    function dvRuleAt(c, r) {
+      var list = (sh && sh.dv) || [];
+      for (var i = 0; i < list.length; i++) { var g = parseRange(list[i].ref); if (g && inRange(g, c, r)) return list[i]; }
+      return null;
+    }
+    // リストの候補（カンマ区切り、または A1:A9 のような範囲）
+    function dvListValues(rule) {
+      var src = String(rule.f1 || "").trim().replace(/^=/, ""), g = parseRange(src), out = [];
+      if (g) {
+        for (var r = g.r1; r <= g.r2; r++) for (var c = g.c1; c <= g.c2; c++) {
+          var x = show(book.val(si, c, r), styleAt(c, r).nf).text;
+          if (x !== "") out.push(x);
+        }
+        return out;
+      }
+      return src.split(/[,、;]/).map(function (s) { return s.trim(); }).filter(function (s) { return s !== ""; });
+    }
+    // 規則に合わない値なら true。数式は検証しない（計算結果を信じる）
+    function dvFail(rule, c, r, raw) {
+      if (!rule) return false;
+      raw = raw === undefined ? rawAt(c, r) : String(raw);
+      if (raw === "") return rule.allowBlank === false;
+      if (raw.charAt(0) === "=") return false;
+      if (rule.type === "list") {
+        var low = raw.toLowerCase();
+        return dvListValues(rule).map(function (x) { return String(x).toLowerCase(); }).indexOf(low) < 0;
+      }
+      if (rule.type === "custom") {
+        var g = parseRange(rule.ref) || { c1: c, r1: r };
+        try {
+          var src = F.shift(String(rule.f1 || "").trim().replace(/^=/, ""), c - g.c1, r - g.r1);
+          if (!src) return false;
+          var v = F.evaluate(F.parse(src), { get: book.val, sheet: book.sheetIndex, here: { s: si, c: c, r: r }, last: book.last });
+          return !v || F.isErr(v);
+        } catch (e) { return false; }
+      }
+      var val;
+      if (rule.type === "date") { val = F.parseDate(raw); if (val === null) val = F.parseNum(raw); }
+      else if (rule.type === "textLength") val = raw.length;
+      else val = F.parseNum(raw);
+      if (val === null || (typeof val === "number" && !isFinite(val))) return true;
+      function lim(key) {
+        var s = String(rule[key] === undefined || rule[key] === null ? "" : rule[key]).trim().replace(/^=/, "");
+        if (!s) return null;
+        if (rule.type === "date") { var d = F.parseDate(s); return d === null ? F.parseNum(s) : d; }
+        return F.parseNum(s);
+      }
+      var a = lim("f1"), b = lim("f2"), hit;
+      switch (rule.op) {
+        case "between": if (a === null || b === null) return false; hit = val >= a && val <= b; break;
+        case "notBetween": if (a === null || b === null) return false; hit = val >= a && val <= b; break;
+        case "equal": if (a === null) return false; hit = val === a; break;
+        case "notEqual": if (a === null) return false; hit = val === a; break;
+        case "greaterThan": if (a === null) return false; hit = val > a; break;
+        case "lessThan": if (a === null) return false; hit = val < a; break;
+        case "greaterThanOrEqual": if (a === null) return false; hit = val >= a; break;
+        case "lessThanOrEqual": if (a === null) return false; hit = val <= a; break;
+        default: return false;
+      }
+      if (rule.op === "notBetween" || rule.op === "notEqual") return hit;
+      return !hit;
+    }
+
+    // ---------- セルのコメント（data.notes） ----------
+    function noteAt(c, r) { return (sh && sh.notes && sh.notes[ref(c, r)]) || null; }
+    function noteMark(c, r) {
+      var n = noteAt(c, r);
+      if (!n || !n.text) return "";
+      var tip = (n.author ? n.author + "：" : "") + n.text;
+      return '<span class="cmt-mark" title="' + esc(tip) + '" aria-label="' + esc(t("コメント")) + '"></span>';
+    }
+
     // ---------- いまの状態 ----------
     var data = null, book = null, si = 0, sh = null;
     // act: 選んでいるセル（入力するところ）。anc: 範囲のもう一方の角（Shift+矢印・ドラッグで動く）
@@ -151,6 +242,8 @@
     var editing = false, editMode = "enter", refIns = null;
     var chartSel = null, clip = null, painter = null, zoomZ = 1;
     var mtop = {}, covered = {}, hiddenRows = {}, fzTop = {}, fzLeft = {}, cfCache = null;
+    // 見えている行だけを作る（win: 作っている行。rowH: 作ったときに測った高さ。defH: ふつうの行の高さ。posCache: 各行の上の位置）
+    var win = { r0: 1, r1: 0 }, rowH = {}, defH = 0, posCache = null, BUF = 40;
     function el(id) { return $(id); }
     function range() { return norm({ c1: anc.c, r1: anc.r, c2: act.c, r2: act.r }); }
     function isOne(g) { return g.c1 === g.c2 && g.r1 === g.r2; }
@@ -267,6 +360,7 @@
       if (st.al) cls.push("is-" + st.al);
       if (st.va) cls.push("va-" + st.va);
       if (st.wrap) cls.push("is-wrap");
+      if (dvFail(dvRuleAt(c, r), c, r, rawAt(c, r))) cls.push("is-invalid");
       var css = "";
       if (d.color || st.fg) css += "color:" + (d.color || st.fg) + ";";
       if (st.bg) css += "background-color:" + st.bg + ";";
@@ -296,7 +390,7 @@
     function cellHtml(c, r) {
       var k = ref(c, r), m = mtop[k], p = partsFor(c, r);
       return "<td data-c=\"" + c + "\" data-r=\"" + r + "\"" + (m ? (m.cs > 1 ? ' colspan="' + m.cs + '"' : "") + (m.rs > 1 ? ' rowspan="' + m.rs + '"' : "") : "") +
-        (p.cls ? ' class="' + p.cls + '"' : "") + (p.css ? ' style="' + p.css + '"' : "") + ">" + esc(p.text) + filterBtn(c, r) + "</td>";
+        (p.cls ? ' class="' + p.cls + '"' : "") + (p.css ? ' style="' + p.css + '"' : "") + ">" + esc(p.text) + noteMark(c, r) + filterBtn(c, r) + "</td>";
     }
     function rowHtml(r) {
       var cls = (r === sh.head ? "head" : r === sh.total ? "total" : "") + (hiddenRows[r] ? " is-hide" : "");
@@ -320,8 +414,80 @@
       sh.charts.forEach(function (ch) { var g = parseRange(ch.ref); if (g) { mr = Math.max(mr, g.r2); mc = Math.max(mc, g.c2); } });
       sh.merges.forEach(function (m) { var g = parseRange(m); if (g) { mr = Math.max(mr, g.r2); mc = Math.max(mc, g.c2); } });
       Object.keys(sh.style).forEach(function (k) { var p = parseRef(k); if (p) { mr = Math.max(mr, p.r); mc = Math.max(mc, p.c); } });
+      Object.keys(sh.notes || {}).forEach(function (k) { var p = parseRef(k); if (p) { mr = Math.max(mr, p.r); mc = Math.max(mc, p.c); } });
+      (sh.dv || []).forEach(function (rule) { var g = parseRange(rule.ref); if (g) { mr = Math.max(mr, g.r2); mc = Math.max(mc, g.c2); } });
       nRows = Math.max(nRows, 60, last.rows + 40, mr + 20, act.r + 20);
       nCols = Math.max(nCols, 26, last.cols + 6, mc + 4, act.c + 4);
+    }
+
+    // ---------- 見えている行だけを作る ----------
+    //   何万行もあると、全部の行を作ると重いので、見えているところと上下 BUF 行だけを作る。その上と下は、高さだけの空の行（tr.vpad）で場所をとる。
+    //   行の位置は positions()（隠した行は 0、作ったことのある行は測った高さ、ほかは sh.rh かふつうの高さ）。固定する行（1〜frozenRows() 行目）はいつも作る
+    function frozenRows() { return sh.freeze && sh.freeze.r ? Math.min(sh.freeze.r, nRows) : 0; }
+    function hOf(r) { return hiddenRows[r] ? 0 : rowH[r] || sh.rh[r] || defH || 29; }
+    function positions() {
+      if (posCache && posCache.length === nRows + 2) return posCache;
+      var p = new Float64Array(nRows + 2);
+      for (var r = 1; r <= nRows; r++) p[r + 1] = p[r] + hOf(r);
+      return (posCache = p);
+    }
+    function rowAt(y) {
+      var p = positions(), lo = 1, hi = nRows;
+      if (y <= 0) return 1;
+      while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (p[mid] <= y) lo = mid; else hi = mid - 1; }
+      return lo;
+    }
+    function padHtml(kind, h) { return '<tr class="vpad" data-pad="' + kind + '" style="height:' + Math.max(0, h) + 'px"><td colspan="' + (nCols + 1) + '"></td></tr>'; }
+    function updatePads() {
+      var tbl = el("grid"), p = positions(), fr = frozenRows();
+      if (!tbl) return;
+      var top = tbl.querySelector('tr[data-pad="top"]'), bot = tbl.querySelector('tr[data-pad="bot"]');
+      if (top) top.style.height = Math.max(0, p[Math.max(win.r0, fr + 1)] - p[fr + 1]) + "px";
+      if (bot) bot.style.height = Math.max(0, p[nRows + 1] - p[Math.min(nRows, Math.max(win.r1, fr)) + 1]) + "px";
+    }
+    // 作った行の高さを測る（折り返しで高くなった行など）。変わっていたら、位置と空の行の高さを直す
+    function measureRows(force) {
+      var tb = el("grid") && el("grid").tBodies[0], diff = !!force, minH = 0;
+      if (!tb) return;
+      Array.prototype.forEach.call(tb.rows, function (tr) {
+        if (tr.classList.contains("vpad")) return;
+        var r = +tr.getAttribute("data-r"), h = tr.offsetHeight;
+        if (!h || hiddenRows[r]) return;
+        if (!sh.rh[r] && (!minH || h < minH)) minH = h;
+        if (h !== hOf(r)) { rowH[r] = h; diff = true; }
+      });
+      if (!defH && minH) { defH = minH; diff = true; }
+      if (diff) { posCache = null; updatePads(); }
+    }
+    // 行 r の上の位置（.grid-wrap の中。ズームする前の px）
+    function rowY(r) { var tbl = el("grid"); return tbl.offsetTop + tbl.tBodies[0].offsetTop + positions()[Math.max(1, Math.min(r, nRows + 1))]; }
+    function renderWindow(force) {
+      var tbl = el("grid"), sc = el("grid-scroll"), tb = tbl && tbl.tBodies[0];
+      if (!tb || !sc) return;
+      var z = zoomZ || 1, fr = frozenRows(), p = positions(), base = tbl.offsetTop + tb.offsetTop;
+      var y0 = sc.scrollTop / z - base, y1 = y0 + sc.clientHeight / z;
+      var a = Math.max(fr + 1, rowAt(y0)), b = Math.min(nRows, rowAt(y1));
+      if (!force && win.r1 >= win.r0 && a >= win.r0 && b <= win.r1) return;
+      var r0 = Math.max(fr + 1, a - BUF), r1 = Math.min(nRows, Math.max(b, a) + BUF);
+      // 結合したセルが窓の端にかかるときは、結合が全部入るように広げる（左上のセルがないと、結合が描けない）
+      sh.merges.forEach(function (m) { var g = parseRange(m); if (g && g.r1 > fr && g.r2 >= r0 && g.r1 <= r1) { r0 = Math.min(r0, g.r1); r1 = Math.max(r1, g.r2); } });
+      win = { r0: r0, r1: r1 };
+      Array.prototype.slice.call(tb.rows).forEach(function (tr) { if (tr.classList.contains("vpad") || +tr.getAttribute("data-r") > fr) tr.remove(); });
+      var h = padHtml("top", p[r0] - p[fr + 1]);
+      for (var r = r0; r <= r1; r++) h += rowHtml(r);
+      tb.insertAdjacentHTML("beforeend", h + padHtml("bot", p[nRows + 1] - p[Math.max(r1, fr) + 1]));
+      measureRows();
+      placeSel();
+    }
+    // 行 r を作って見えるところに出す（縦だけ。横は scrollToCell）
+    function revealRow(r) {
+      var sc = el("grid-scroll"), tbl = el("grid");
+      if (!sc || !tbl) return;
+      var z = zoomZ || 1, fr = frozenRows(), p = positions();
+      var headH = tbl.tHead ? tbl.tHead.offsetHeight : 29, top = rowY(r) * z, bottom = rowY(r + 1) * z, topLimit = sc.scrollTop + (headH + (r > fr ? p[fr + 1] : 0)) * z;
+      if (top < topLimit) sc.scrollTop -= topLimit - top;
+      else if (bottom > sc.scrollTop + sc.clientHeight) sc.scrollTop = bottom - sc.clientHeight;
+      renderWindow();
     }
     function drawGrid(keepScroll) {
       var scroller = el("grid-scroll");
@@ -330,20 +496,23 @@
       book.reset(); cfCache = null;
       indexMerges(); indexHidden();
       extent();
-      fzTop = {}; fzLeft = {};
+      fzTop = {}; fzLeft = {}; rowH = {}; posCache = null; win = { r0: 1, r1: 0 };
       var tbl = el("grid"), h = '<colgroup><col style="width:' + HEADW + 'px">';
       var total = HEADW;
       for (var c = 0; c < nCols; c++) { h += '<col style="width:' + colW(c) + 'px">'; total += colW(c); }
       h += '</colgroup><thead><tr><th class="corner" data-corner title="' + esc(t("すべて選択")) + '"></th>';
       for (c = 0; c < nCols; c++) h += '<th data-col="' + c + '">' + F.colName(c) + '<span class="col-rs" data-rs="' + c + '"></span></th>';
       h += "</tr></thead><tbody>";
-      for (var r = 1; r <= nRows; r++) h += rowHtml(r);
-      tbl.innerHTML = h + "</tbody>";
+      // ここでは固定する行だけを作る。ほかの行は renderWindow が、見えているところだけ作る
+      for (var r = 1; r <= frozenRows(); r++) h += rowHtml(r);
+      tbl.innerHTML = h + padHtml("top", 0) + padHtml("bot", 0) + "</tbody>";
       tbl.style.width = total + "px";
       tbl.classList.toggle("no-grid", sh.grid === false);
       // 固定する行・列は、置いた位置を測ってから、もう一度その位置に貼りつける
       if (measureFreeze()) refreshCells(true);
+      measureRows(true);
       if (keepScroll) { scroller.scrollLeft = sx; scroller.scrollTop = sy; }
+      renderWindow(true);
       drawCharts();
       drawTabs();
       placeSel();
@@ -362,20 +531,22 @@
         if (all && fzTop[r] !== undefined) { var th = tr.firstChild; th.style.top = fzTop[r] + "px"; th.style.zIndex = 6; }
       });
       tbl.querySelectorAll("td[data-c]").forEach(function (td) {
-        var c = +td.getAttribute("data-c"), r = +td.getAttribute("data-r"), p = partsFor(c, r), html = esc(p.text) + filterBtn(c, r);
+        var c = +td.getAttribute("data-c"), r = +td.getAttribute("data-r"), p = partsFor(c, r), html = esc(p.text) + noteMark(c, r) + filterBtn(c, r);
         if (td.innerHTML !== html) td.innerHTML = html;
         if ((td.getAttribute("class") || "") !== p.cls) { if (p.cls) td.setAttribute("class", p.cls); else td.removeAttribute("class"); }
         if ((td.getAttribute("style") || "") !== p.css) { if (p.css) td.setAttribute("style", p.css); else td.removeAttribute("style"); }
       });
+      // 中身が変わると、折り返しで行の高さが変わることがある。フィルターで隠す行が変わったら、位置を計算しなおす
+      if (rowsChanged) posCache = null;
+      measureRows(rowsChanged);
     }
-    // 下までスクロールしたら、行を足す
+    // 下までスクロールしたら、行を足す（行の数を増やして、下の空の行を高くするだけ）
     function moreRows(n) {
-      var tb = el("grid") && el("grid").tBodies[0];
-      if (!tb) return;
-      var h = "", from = nRows + 1;
+      if (!el("grid")) return;
       nRows += n;
-      for (var r = from; r <= nRows; r++) h += rowHtml(r);
-      tb.insertAdjacentHTML("beforeend", h);
+      posCache = null;
+      updatePads();
+      renderWindow();
     }
     function moreCols(n) { nCols += n; drawGrid(true); }
 
@@ -388,8 +559,15 @@
     function rectOf(g) {
       var wrap = el("grid-wrap");
       g = grow(g);
+      if (!wrap) return null;
       var a = tdAt(g.c1, g.r1), b = tdAt(g.c2, g.r2);
-      if (!a || !b || !wrap) return null;
+      // 範囲の端の行をまだ作っていないときは、行の位置（positions）と列の見出しから計算する
+      if (!a || !b) {
+        var tbl = el("grid"), heads = tbl.tHead ? tbl.tHead.rows[0].cells : [], ca = heads[g.c1 + 1], cb = heads[Math.min(g.c2, nCols - 1) + 1];
+        if (!ca || !cb) return null;
+        var y = rowY(g.r1);
+        return { x: tbl.offsetLeft + ca.offsetLeft, y: y, w: cb.offsetLeft + cb.offsetWidth - ca.offsetLeft, h: rowY(g.r2 + 1) - y };
+      }
       var w = wrap.getBoundingClientRect(), ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect(), z = zoomZ || 1;
       if (!ra.width && !rb.width) return null;
       return { x: (ra.left - w.left) / z, y: (ra.top - w.top) / z, w: (rb.right - ra.left) / z, h: (rb.bottom - ra.top) / z };
@@ -440,6 +618,7 @@
     }
     function scrollToCell(c, r) {
       var td = tdAt(c, r), sc = el("grid-scroll");
+      if (!td && sc) { revealRow(mergeAt(c, r) ? mergeAt(c, r).r1 : r); td = tdAt(c, r); }
       if (!td || !sc) return;
       var a = td.getBoundingClientRect(), b = sc.getBoundingClientRect();
       var headH = (el("grid").tHead ? el("grid").tHead.getBoundingClientRect().height : 29), headW = HEADW * zoomZ;
@@ -491,21 +670,38 @@
       ced.classList.remove("is-edit");
       ced.setAttribute("data-office-keys", "");
       ced.value = "";
-      if (commit) commitCell(act.c, act.r, v);
+      if (commit) {
+        if (commitCell(act.c, act.r, v) === false) {
+          // 入力規則で止めたときは、入れた値を数式バーに残す（直しやすいように）
+          el("fx").value = v;
+          placeEditor();
+          return true;
+        }
+      }
       el("fx").value = rawAt(act.c, act.r);
       placeEditor();
       return true;
     }
     function commitCell(c, r, v) {
-      if (readOnly()) return;
+      if (readOnly()) return false;
       v = String(v).replace(/^＝/, "=");
       // 数式の関数の名前は大文字に
       if (v.charAt(0) === "=") v = "=" + F.tokenize(v.slice(1)).map(function (x) { return x.t === "fn" ? x.s.toUpperCase() : x.s; }).join("");
       var k = ref(c, r), old = sh.cells[k] || "";
-      if (v === old) return;
+      if (v === old) return true;
+      // 入力規則。停止なら入れない（警告・情報なら入れて知らせる）
+      var rule = dvRuleAt(c, r);
+      if (v !== "" && dvFail(rule, c, r, v)) {
+        if ((rule.style || "stop") === "stop") {
+          O.notify(rule.err || t("このセルには、決めた条件の値だけを入れられます"));
+          return false;
+        }
+        O.notify(rule.err || t("入力規則に合っていない値を入れました"));
+      }
       if (v === "") delete sh.cells[k]; else sh.cells[k] = v;
       if (v && !(sh.style[k] && sh.style[k].nf)) { var nf = autoNf(v); if (nf) { sh.style[k] = Object.assign({}, sh.style[k] || {}, { nf: nf }); } }
       changed();
+      return true;
     }
     // 中身を変えたあと（表を作り直す・保存する・元に戻すために覚える）
     function changed(structural) {
@@ -608,6 +804,7 @@
       }
       sh.cells = move(sh.cells);
       sh.style = move(sh.style);
+      sh.notes = move(sh.notes);
       function moveNum(map) {
         var out = {};
         Object.keys(map).forEach(function (k) { var v = +k; if (n < 0 && v >= at && v < at - n) return; out[v >= at ? v + n : v] = map[k]; });
@@ -620,6 +817,12 @@
       }
       sh.merges = sh.merges.map(fixRange).filter(Boolean);
       sh.cf = sh.cf.map(function (rule) { var r2 = fixRange(rule.ref); if (!r2) return null; rule.ref = r2; return rule; }).filter(Boolean);
+      sh.dv = sh.dv.map(function (rule) {
+        var r2 = fixRange(rule.ref); if (!r2) return null;
+        rule.ref = r2;
+        if (rule.type === "list" && parseRange(String(rule.f1 || "").replace(/^=/, ""))) { var f2 = fixRange(String(rule.f1).replace(/^=/, "")); if (f2) rule.f1 = f2; }
+        return rule;
+      }).filter(Boolean);
       sh.charts.forEach(function (ch) { var r2 = fixRange(ch.ref); if (r2) ch.ref = r2; });
       if (axis === "r") {
         ["head", "total"].forEach(function (k) { if (sh[k] >= at) { if (n < 0 && sh[k] < at - n) delete sh[k]; else sh[k] += n; } });
@@ -1191,6 +1394,93 @@
       });
     }
 
+    // ---------- 入力規則 ----------
+    function dvDialog(at) {
+      var cur = dvRuleAt(act.c, act.r), r = Object.assign(dvEmpty(), cur || { ref: rangeText(range()) });
+      var body = document.createElement("div"), list = function (a) { return a.map(function (x) { return '<option value="' + x.v + '">' + esc(x.label) + "</option>"; }).join(""); };
+      body.innerHTML = '<div class="dlg-grid">' +
+        '<label for="dv-ref">' + esc(t("範囲")) + '</label><input id="dv-ref" type="text" value="' + esc(r.ref) + '">' +
+        '<label for="dv-type">' + esc(t("種類")) + '</label><select id="dv-type">' + list(DV_TYPES) + "</select>" +
+        '<label for="dv-op" data-dv="op">' + esc(t("条件")) + '</label><select id="dv-op" data-dv="op">' + list(DV_OPS) + "</select>" +
+        '<label for="dv-f1" data-dv="f1">' + esc(t("値")) + '</label><input id="dv-f1" type="text" value="' + esc(r.f1 || "") + '">' +
+        '<label for="dv-f2" data-dv="f2">' + esc(t("最大値")) + '</label><input id="dv-f2" type="text" value="' + esc(r.f2 || "") + '">' +
+        "<label>" + esc(t("空白を許可")) + '</label><input id="dv-blank" type="checkbox"' + (r.allowBlank !== false ? " checked" : "") + ">" +
+        '<label for="dv-prompt-title">' + esc(t("入力時の見出し")) + '</label><input id="dv-prompt-title" type="text" maxlength="32" value="' + esc(r.promptTitle || "") + '">' +
+        '<label for="dv-prompt">' + esc(t("入力時のメッセージ")) + '</label><input id="dv-prompt" type="text" maxlength="255" value="' + esc(r.prompt || "") + '">' +
+        '<label for="dv-err-title">' + esc(t("エラーの見出し")) + '</label><input id="dv-err-title" type="text" maxlength="32" value="' + esc(r.errTitle || "") + '">' +
+        '<label for="dv-err">' + esc(t("エラー メッセージ")) + '</label><input id="dv-err" type="text" maxlength="255" value="' + esc(r.err || "") + '">' +
+        '<label for="dv-style">' + esc(t("エラーの種類")) + '</label><select id="dv-style">' + list(DV_STYLES) + "</select>" +
+        '</div><p class="dlg-note">' + esc(t("決めた条件に合わない値を入れたときの動きを選びます。停止は入れられません。警告と情報は入れて知らせます。")) + "</p>";
+      var typeEl = body.querySelector("#dv-type"), opEl = body.querySelector("#dv-op");
+      typeEl.value = r.type; opEl.value = r.op; body.querySelector("#dv-style").value = r.style;
+      function show(id, on) {
+        var n = body.querySelector("#" + id), lb = body.querySelector('label[for="' + id + '"]');
+        if (n) n.style.display = on ? "" : "none";
+        if (lb) lb.style.display = on ? "" : "none";
+      }
+      function sync() {
+        var type = typeEl.value, op = opEl.value, cmp = type !== "list" && type !== "custom";
+        show("dv-op", cmp);
+        show("dv-f2", cmp && (op === "between" || op === "notBetween"));
+        var l1 = body.querySelector('label[for="dv-f1"]'), l2 = body.querySelector('label[for="dv-f2"]');
+        l1.textContent = type === "list" ? t("リスト（カンマ区切り、または A1:A9）") : type === "custom" ? t("数式（例：LEN(A1)>3）") : type === "textLength" ? t("文字数") : type === "date" ? t("日付") : t("最小値");
+        l2.textContent = type === "date" ? t("日付") : t("最大値");
+      }
+      sync();
+      typeEl.addEventListener("change", sync);
+      opEl.addEventListener("change", sync);
+      return M3.dialog({ title: cur ? t("入力規則を編集") : t("入力規則"), icon: "rule", body: body, actions: [
+        { label: t("キャンセル"), value: null },
+        { label: t("保存"), primary: true, value: function () {
+          var g = parseRange(body.querySelector("#dv-ref").value);
+          if (!g) return null;
+          return { ref: rangeText(g), type: typeEl.value, op: opEl.value, f1: body.querySelector("#dv-f1").value.trim(), f2: body.querySelector("#dv-f2").value.trim(),
+            allowBlank: body.querySelector("#dv-blank").checked, promptTitle: body.querySelector("#dv-prompt-title").value.trim(), prompt: body.querySelector("#dv-prompt").value.trim(),
+            errTitle: body.querySelector("#dv-err-title").value.trim(), err: body.querySelector("#dv-err").value.trim(), style: body.querySelector("#dv-style").value };
+        } }
+      ] }).then(function (v) {
+        if (!v) return;
+        var idx = cur ? sh.dv.indexOf(cur) : -1;
+        if (idx < 0) { sh.dv.forEach(function (x, i) { if (x.ref === v.ref) idx = i; }); }
+        if (idx >= 0) sh.dv[idx] = v; else sh.dv.push(v);
+        changed();
+      });
+    }
+    function dvClear() {
+      var g = range(), n = sh.dv.length;
+      sh.dv = sh.dv.filter(function (rule) { var r = parseRange(rule.ref); return !r || r.c2 < g.c1 || r.c1 > g.c2 || r.r2 < g.r1 || r.r1 > g.r2; });
+      if (sh.dv.length === n) O.notify(t("このセルには入力規則がありません"));
+      else changed();
+    }
+
+    // ---------- セルのコメント ----------
+    function noteEdit(c, r) {
+      if (readOnly()) { O.notify(t("閲覧モードでは書きかえられません")); return; }
+      var cur = noteAt(c, r), body = document.createElement("div"), me = O.userName() || t("自分");
+      body.innerHTML = '<div class="dlg-grid"><label for="nt-author">' + esc(t("名前")) + '</label><input id="nt-author" type="text" maxlength="40" value="' + esc(cur ? cur.author || me : me) + '"></div>' +
+        '<textarea id="nt-text" class="dlg-area dlg-area--note" placeholder="' + esc(t("コメントを入力")) + '">' + esc(cur ? cur.text : "") + "</textarea>" +
+        '<p class="dlg-note">' + esc(t("セルの右上に赤い印が付きます。カーソルを合わせるとコメントが読めます。")) + "</p>";
+      var actions = [{ label: t("キャンセル"), value: null }];
+      if (cur) actions.push({ label: t("削除"), danger: true, value: { del: true } });
+      actions.push({ label: t("保存"), primary: true, value: function () {
+        var text = body.querySelector("#nt-text").value.trim();
+        if (!text) return { del: true };
+        return { text: text, author: body.querySelector("#nt-author").value.trim() || me, ts: Date.now() };
+      } });
+      return M3.dialog({ title: cur ? t("コメントを編集") : t("コメントを挿入"), icon: "sticky_note_2", body: body, actions: actions }).then(function (v) {
+        if (v === null || v === undefined) return;
+        if (v.del) delete sh.notes[ref(c, r)];
+        else sh.notes[ref(c, r)] = { text: v.text, author: v.author, ts: v.ts };
+        changed();
+      });
+    }
+    function noteDelete() {
+      if (readOnly()) { O.notify(t("閲覧モードでは書きかえられません")); return; }
+      if (!noteAt(act.c, act.r)) { O.notify(t("このセルにはコメントがありません")); return; }
+      delete sh.notes[ref(act.c, act.r)];
+      changed();
+    }
+
     // ---------- ステータスバー ----------
     function stat() {
       var g = grow(range()), h = "";
@@ -1240,13 +1530,14 @@
         "</div>";
       wire();
       drawGrid();
-      if (opts && opts.restore) { el("grid-scroll").scrollLeft = sx; el("grid-scroll").scrollTop = sy; placeSel(); }
+      if (opts && opts.restore) { el("grid-scroll").scrollLeft = sx; el("grid-scroll").scrollTop = sy; renderWindow(); placeSel(); }
       applyZoom();
       focusGrid();
     }
     function applyZoom() {
       var w = el("grid-wrap");
       if (w) w.style.zoom = zoomZ;
+      renderWindow();
       placeSel();
     }
 
@@ -1281,7 +1572,9 @@
     }
     function wire() {
       var wrap = el("grid-wrap"), sc = el("grid-scroll"), ced = el("ced"), fx = el("fx"), nb = el("namebox");
+      var winFrame = 0;
       sc.addEventListener("scroll", function () {
+        if (!winFrame) winFrame = requestAnimationFrame(function () { winFrame = 0; renderWindow(); });
         if (sc.scrollTop + sc.clientHeight > sc.scrollHeight - 300) moreRows(100);
         if (sc.scrollLeft + sc.clientWidth > sc.scrollWidth - 200 && nCols < 16384) moreCols(10);
       });
@@ -1409,9 +1702,10 @@
       var y0 = e.clientY, h0 = sh.rh[r] || 28;
       drag(e, function (ev) {
         var h = Math.max(12, Math.round(h0 + (ev.clientY - y0) / zoomZ));
-        sh.rh[r] = h;
+        sh.rh[r] = h; rowH[r] = h; posCache = null;
         var tr = el("grid").querySelector('tr[data-r="' + r + '"]');
         if (tr) tr.style.height = h + "px";
+        measureRows(true);
         placeSel();
       }, function () { changed(true); });
     }
@@ -1513,7 +1807,8 @@
       if (/^Arrow/.test(k)) { e.preventDefault(); arrowKey(k, e.shiftKey, mod); return; }
       if (k === "Enter") { e.preventDefault(); moveBy(0, e.shiftKey ? -1 : 1); return; }
       if (k === "Tab") { e.preventDefault(); moveBy(e.shiftKey ? -1 : 1, 0); return; }
-      if (k === "Home") { e.preventDefault(); if (mod) select(0, 1, e.shiftKey); else select(0, act.r, e.shiftKey); return; }
+      // Ctrl+Home は、いちばん上・左はしまで戻す（A1 が固定した行にあると、選ぶだけでは表が動かないため）
+      if (k === "Home") { e.preventDefault(); if (mod) { var hs = el("grid-scroll"); hs.scrollTop = 0; hs.scrollLeft = 0; renderWindow(); select(0, 1, e.shiftKey); } else select(0, act.r, e.shiftKey); return; }
       if (k === "End" && mod) { e.preventDefault(); var l = book.last(si); select(Math.max(0, l.cols - 1), Math.max(1, l.rows), e.shiftKey); return; }
       if (k === "PageDown" || k === "PageUp") {
         e.preventDefault();
@@ -1522,6 +1817,7 @@
         return;
       }
       if (k === "Delete" || k === "Backspace") { e.preventDefault(); if (readOnly()) return; clearRange("content"); return; }
+      if (k === "F2" && e.shiftKey) { e.preventDefault(); noteEdit(act.c, act.r); return; }
       if (k === "F2") { e.preventDefault(); startEdit("edit", rawAt(act.c, act.r)); return; }
       if (mod && !e.altKey) {
         var kk = k.toLowerCase();
@@ -1563,6 +1859,9 @@
         { value: "delRow", label: t("行を削除"), icon: "delete" },
         { value: "delCol", label: t("列を削除"), icon: "delete" },
         { sep: 1 },
+        { value: "note", label: t(noteAt(act.c, act.r) ? "コメントを編集" : "コメントを挿入"), icon: "sticky_note_2", sub: "Shift+F2" },
+        { value: "noteDel", label: t("コメントを削除"), icon: "delete", disabled: !noteAt(act.c, act.r) },
+        { sep: 1 },
         { value: "clear", label: t("数式と値のクリア"), icon: "ink_eraser", sub: "Delete" },
         { value: "sortAsc", label: t("昇順で並べ替え"), icon: "arrow_upward" },
         { value: "sortDesc", label: t("降順で並べ替え"), icon: "arrow_downward" },
@@ -1574,7 +1873,8 @@
         if (v === "paste") return clip && pasteClip(clip);
         if (v === "pasteValues") return clip && pasteClip(clip, true);
         var map = { rowAbove: function () { insertRows("above"); }, colLeft: function () { insertCols("left"); }, delRow: deleteRows, delCol: deleteCols, clear: function () { clearRange("content"); },
-          sortAsc: function () { sortRange(false); }, sortDesc: function () { sortRange(true); }, merge: toggleMerge };
+          sortAsc: function () { sortRange(false); }, sortDesc: function () { sortRange(true); }, merge: toggleMerge,
+          note: function () { noteEdit(act.c, act.r); }, noteDel: noteDelete };
         if (readOnly()) { O.notify(t("閲覧モードでは書きかえられません")); return; }
         map[v]();
       });
@@ -1671,6 +1971,10 @@
         case "filterClear": if (sh.filter) { sh.filter.hide = {}; changed(true); } return;
         case "dedupe": return dedupe();
         case "cf": return cfMenu(at);
+        case "dv": return dvDialog(at);
+        case "dvClear": return dvClear();
+        case "note": return noteEdit(act.c, act.r);
+        case "noteDelete": return noteDelete();
         case "painter":
           if (painter) { painter = null; O.sync(); return; }
           var src = grow(range()), rows = [];
@@ -1733,6 +2037,8 @@
           { stack: [{ icon: "align_horizontal_left", label: t("横棒"), cmd: "chart:bar" }, { icon: "area_chart", label: t("面"), cmd: "chart:area" }, { icon: "scatter_plot", label: t("散布図"), cmd: "chart:scatter" }] }] },
         { label: t("関数"), items: [{ big: 1, icon: "functions", label: t("関数の挿入"), cmd: "fnMenu" }] },
         { label: t("テキスト"), items: [{ stack: [{ icon: "today", label: t("今日の日付"), sub: "Ctrl+;", cmd: "today" }, { icon: "schedule", label: t("いまの時刻"), cmd: "now" }] }] },
+        { label: t("コメント"), items: [{ big: 1, icon: "sticky_note_2", label: t("コメント"), sub: "Shift+F2", cmd: "note" },
+          { stack: [{ icon: "delete", label: t("コメントを削除"), cmd: "noteDelete" }] }] },
         { label: t("セル"), items: [{ big: 1, icon: "add_box", label: t("挿入"), cmd: "insertMenu", drop: 1 }] }
       ] },
       { tab: t("数式"), groups: [
@@ -1743,7 +2049,8 @@
       { tab: t("データ"), groups: [
         { label: t("並べ替えとフィルター"), items: [{ big: 1, icon: "arrow_upward", label: t("昇順"), cmd: "sort:asc" }, { big: 1, icon: "arrow_downward", label: t("降順"), cmd: "sort:desc" },
           { big: 1, icon: "filter_alt", label: t("フィルター"), cmd: "filter", toggle: "filter" }, { stack: [{ icon: "filter_alt_off", label: t("クリア"), cmd: "filterClear" }] }] },
-        { label: t("データ ツール"), items: [{ big: 1, icon: "layers_clear", label: t("重複の削除"), cmd: "dedupe" }, { big: 1, icon: "format_color_fill", label: t("条件付き書式"), cmd: "cf", drop: 1 }] }
+        { label: t("データ ツール"), items: [{ big: 1, icon: "layers_clear", label: t("重複の削除"), cmd: "dedupe" }, { big: 1, icon: "format_color_fill", label: t("条件付き書式"), cmd: "cf", drop: 1 },
+          { big: 1, icon: "rule", label: t("入力規則"), cmd: "dv" }, { stack: [{ icon: "rule_folder", label: t("入力規則のクリア"), cmd: "dvClear" }] }] }
       ] },
       { tab: t("表示"), groups: [R.view,
         { label: t("表示"), items: [{ stack: [{ icon: "grid_on", label: t("目盛線"), cmd: "gridlines", toggle: "grid" }] }] },
@@ -1814,10 +2121,58 @@
     }
     var X = Zip ? Zip.esc : esc;
     function hex6(c) { var m = /^#?([0-9a-f]{6})$/i.exec(c || ""); return m ? "FF" + m[1].toUpperCase() : null; }
+    // Excel 2010 より後の関数は、ファイルの中では _xlfn. を付ける（付けないと Excel で #NAME? になる）。引数の区切りは , にそろえる
+    var XLFN = /^(CONCAT|TEXTJOIN|IFS|MAXIFS|MINIFS|SWITCH|XLOOKUP|IFNA|XOR|DAYS|STDEV\.S|STDEV\.P|VAR\.S|VAR\.P|RANK\.EQ)$/;
+    function fileFormula(src) { return F.tokenize(src).map(function (x) { return x.t === "fn" && XLFN.test(x.v) ? "_xlfn." + x.s : x.t === "," ? "," : x.s; }).join(""); }
+    // Excel にあるエラーだけを書く（#CIRC! などは #VALUE! にする。開いたときに Excel が計算しなおす）
+    function fileErr(e) { return /^#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A)$/.test(e) ? e : "#VALUE!"; }
+    // 条件付き書式（Sheet の { type, v, color }）を Excel の cfRule にする。dxf(色) は塗りつぶしの書式の番号を返す
+    function cfRuleXml(rule, g, prio, dxf) {
+      var tl = ref(g.c1, g.r1), target = F.parseNum(rule.v), fill = hex6(rule.color || (rule.type === "bar" ? "#93c5fd" : "#fde68a")) || "FFFDE68A";
+      var head = '<cfRule priority="' + prio + '" ';
+      if (rule.type === "gt" || rule.type === "lt" || rule.type === "eq") {
+        if (target === null && rule.type !== "eq") return "";
+        var val = target !== null ? String(target) : '"' + String(rule.v || "").replace(/"/g, '""') + '"';
+        return head + 'type="cellIs" dxfId="' + dxf(fill) + '" operator="' + { gt: "greaterThan", lt: "lessThan", eq: "equal" }[rule.type] + '"><formula>' + X(val) + "</formula></cfRule>";
+      }
+      if (rule.type === "text") {
+        var q = String(rule.v || "").replace(/"/g, '""');
+        return head + 'type="containsText" dxfId="' + dxf(fill) + '" operator="containsText" text="' + X(rule.v || "") + '"><formula>' + X('NOT(ISERROR(SEARCH("' + q + '",' + tl + ")))") + "</formula></cfRule>";
+      }
+      if (rule.type === "dup") return head + 'type="duplicateValues" dxfId="' + dxf(fill) + '"/>';
+      if (rule.type === "bar") return head + 'type="dataBar"><dataBar><cfvo type="min"/><cfvo type="max"/><color rgb="' + fill + '"/></dataBar></cfRule>';
+      if (rule.type === "scale") return head + 'type="colorScale"><colorScale><cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/><color rgb="FFF8696B"/><color rgb="FFFFEB84"/><color rgb="FF63BE7B"/></colorScale></cfRule>';
+      return "";
+    }
+    // 入力規則（Sheet の dv）を Excel の dataValidation にする
+    function dvRuleXml(rule) {
+      var g = parseRange(rule.ref), type = rule.type || "list";
+      if (!g || ["list", "whole", "decimal", "date", "textLength", "custom"].indexOf(type) < 0) return "";
+      function form(v, isList) {
+        var s = String(v === undefined || v === null ? "" : v).trim().replace(/^=/, "");
+        if (!s) return "";
+        if (isList && !parseRange(s)) return '"' + s.replace(/"/g, '""') + '"';
+        return s;
+      }
+      var f1 = form(rule.f1, type === "list"), f2 = form(rule.f2, false);
+      if (!f1) return "";
+      var at = ' type="' + type + '"';
+      if (type !== "list" && type !== "custom") at += ' operator="' + (rule.op || "between") + '"';
+      at += ' allowBlank="' + (rule.allowBlank !== false ? 1 : 0) + '"';
+      if (rule.prompt || rule.promptTitle) {
+        at += ' showInputMessage="1"';
+        if (rule.promptTitle) at += ' promptTitle="' + X(rule.promptTitle) + '"';
+        if (rule.prompt) at += ' prompt="' + X(rule.prompt) + '"';
+      }
+      at += ' showErrorMessage="1" errorStyle="' + (["stop", "warning", "information"].indexOf(rule.style) >= 0 ? rule.style : "stop") + '"';
+      if (rule.errTitle) at += ' errorTitle="' + X(rule.errTitle) + '"';
+      if (rule.err) at += ' error="' + X(rule.err) + '"';
+      return "<dataValidation" + at + ' sqref="' + rangeText(g) + '"><formula1>' + X(f1) + "</formula1>" + (f2 ? "<formula2>" + X(f2) + "</formula2>" : "") + "</dataValidation>";
+    }
     function xlsxFiles() {
       var fonts = ['<font><sz val="11"/><name val="游ゴシック"/><family val="3"/></font>'], fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>'];
       var bordersX = ["<border><left/><right/><top/><bottom/><diagonal/></border>"], numFmts = [], xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];
-      var fontIdx = {}, fillIdx = {}, bdIdx = {}, nfIdx = {}, xfIdx = {};
+      var fontIdx = {}, fillIdx = {}, bdIdx = {}, nfIdx = {}, xfIdx = {}, dxfs = [], dxfIdx = {};
       var BUILTIN = { "0": 1, "0.00": 2, "#,##0": 3, "#,##0.00": 4, "0%": 9, "0.00%": 10, "0.00E+00": 11, "@": 49 };
       function idx(map, list, key, xml) { if (!(key in map)) { map[key] = list.length; list.push(xml); } return map[key]; }
       function xfOf(st) {
@@ -1845,6 +2200,8 @@
         var u = usedRange(s), rows = [];
         var byRow = {};
         Object.keys(s.cells).concat(Object.keys(s.style)).forEach(function (k) { var p = parseRef(k); if (p) (byRow[p.r] = byRow[p.r] || {})[p.c] = 1; });
+        // セルのない行も、高さを変えていれば書く
+        Object.keys(s.rh).forEach(function (r) { if (+r >= 1) byRow[r] = byRow[r] || {}; });
         Object.keys(byRow).map(Number).sort(function (a, c) { return a - c; }).forEach(function (r) {
           var cs = Object.keys(byRow[r]).map(Number).sort(function (a, c) { return a - c; }), cells = [];
           cs.forEach(function (c) {
@@ -1856,18 +2213,58 @@
             if (raw === undefined || raw === "") { if (sx) cells.push('<c r="' + k + '"' + sAttr + "/>"); return; }
             var v = b.val(n, c, r);
             if (raw.charAt(0) === "=") {
-              var f = "<f>" + X(raw.slice(1)) + "</f>";
-              if (typeof v === "number") cells.push('<c r="' + k + '"' + sAttr + ">" + f + "<v>" + v + "</v></c>");
+              var f = "<f>" + X(fileFormula(raw.slice(1))) + "</f>";
+              if (typeof v === "number" && isFinite(v)) cells.push('<c r="' + k + '"' + sAttr + ">" + f + "<v>" + v + "</v></c>");
               else if (typeof v === "boolean") cells.push('<c r="' + k + '"' + sAttr + ' t="b">' + f + "<v>" + (v ? 1 : 0) + "</v></c>");
-              else if (F.isErr(v)) cells.push('<c r="' + k + '"' + sAttr + ' t="e">' + f + "<v>" + X(v.err) + "</v></c>");
+              else if (F.isErr(v) || typeof v === "number") cells.push('<c r="' + k + '"' + sAttr + ' t="e">' + f + "<v>" + X(fileErr(typeof v === "number" ? "#NUM!" : v.err)) + "</v></c>");
               else cells.push('<c r="' + k + '"' + sAttr + ' t="str">' + f + "<v>" + X(v === null ? "" : String(v)) + "</v></c>");
-            } else if (typeof v === "number") cells.push('<c r="' + k + '"' + sAttr + "><v>" + v + "</v></c>");
+            } else if (typeof v === "number" && isFinite(v)) cells.push('<c r="' + k + '"' + sAttr + "><v>" + v + "</v></c>");
             else if (typeof v === "boolean") cells.push('<c r="' + k + '"' + sAttr + ' t="b"><v>' + (v ? 1 : 0) + "</v></c>");
             else cells.push('<c r="' + k + '"' + sAttr + ' t="inlineStr"><is><t xml:space="preserve">' + X(String(v)) + "</t></is></c>");
           });
           rows.push('<row r="' + r + '"' + (s.rh[r] ? ' ht="' + Math.round(s.rh[r] * 0.75 * 10) / 10 + '" customHeight="1"' : "") + ">" + cells.join("") + "</row>");
         });
         var cols = Object.keys(s.cw).map(Number).sort(function (a, c) { return a - c; }).map(function (c) { return '<col min="' + (c + 1) + '" max="' + (c + 1) + '" width="' + Math.max(1, Math.round((s.cw[c] - 5) / 7 * 100) / 100) + '" customWidth="1"/>'; });
+        var cfs = [];
+        (s.cf || []).forEach(function (rule) {
+          var g = parseRange(rule.ref), x = g && cfRuleXml(rule, g, cfs.length + 1, function (fill) {
+            return idx(dxfIdx, dxfs, fill, '<dxf><font><color rgb="FF1F2328"/></font><fill><patternFill patternType="solid"><bgColor rgb="' + fill + '"/></patternFill></fill></dxf>');
+          });
+          if (x) cfs.push('<conditionalFormatting sqref="' + rangeText(g) + '">' + x + "</conditionalFormatting>");
+        });
+        var dvs = (s.dv || []).map(dvRuleXml).filter(Boolean);
+        var dvStr = dvs.length ? '<dataValidations count="' + dvs.length + '">' + dvs.join("") + "</dataValidations>" : "";
+        // セルのコメント（旧形式の comments + VML。Excel・LibreOffice・openpyxl が読める形）
+        var noteKeys = Object.keys(s.notes || {}).filter(function (k) { return s.notes[k] && s.notes[k].text && parseRef(k); })
+          .sort(function (a, b) { var p = parseRef(a), q = parseRef(b); return p.r - q.r || p.c - q.c; });
+        var legacy = "";
+        if (noteKeys.length) {
+          var authors = [], aid = {};
+          noteKeys.forEach(function (k) { var a = s.notes[k].author || O.userName() || "SK Hub Office"; if (!(a in aid)) { aid[a] = authors.length; authors.push(a); } });
+          var cms = noteKeys.map(function (k) {
+            var nt = s.notes[k], a = nt.author || O.userName() || "SK Hub Office";
+            return '<comment ref="' + k + '" authorId="' + aid[a] + '"><text><r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><family val="2"/></rPr><t xml:space="preserve">' + X(nt.text) + "</t></r></text></comment>";
+          });
+          files["xl/comments" + (n + 1) + ".xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>' +
+            authors.map(function (a) { return "<author>" + X(a) + "</author>"; }).join("") + "</authors><commentList>" + cms.join("") + "</commentList></comments>";
+          var shapes = noteKeys.map(function (k, i) {
+            var p = parseRef(k), row = p.r - 1, col = p.c;
+            var anchor = col + ", 15, " + row + ", 2, " + Math.min(col + 2, 16383) + ", 15, " + Math.min(row + 4, 1048575) + ", 4";
+            return '<v:shape id="_x0000_s' + (1025 + i) + '" type="#_x0000_t202" style="position:absolute;margin-left:60pt;margin-top:2pt;width:108pt;height:59pt;z-index:' + (i + 1) + ';visibility:hidden" fillcolor="#ffffe1" o:insetmode="auto">' +
+              '<v:fill color2="#ffffe1"/><v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>' +
+              '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"></div></v:textbox>' +
+              '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/><x:Anchor>' + anchor + "</x:Anchor><x:AutoFill>False</x:AutoFill><x:Row>" + row + "</x:Row><x:Column>" + col + "</x:Column></x:ClientData></v:shape>";
+          });
+          files["xl/drawings/vmlDrawing" + (n + 1) + ".vml"] = '<?xml version="1.0" encoding="UTF-8"?>\n<xml xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">' +
+            '<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="' + (n + 1) + '"/></o:shapelayout>' +
+            '<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/><v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>' +
+            shapes.join("") + "</xml>";
+          files["xl/worksheets/_rels/sheet" + (n + 1) + ".xml.rels"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments' + (n + 1) + '.xml"/>' +
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing' + (n + 1) + '.vml"/></Relationships>';
+          ctypes.push('<Override PartName="/xl/comments' + (n + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml"/>');
+          legacy = '<legacyDrawing r:id="rId2"/>';
+        }
         var fz = s.freeze, pane = fz && (fz.r || fz.c) ? '<pane' + (fz.c ? ' xSplit="' + fz.c + '"' : "") + (fz.r ? ' ySplit="' + fz.r + '"' : "") + ' topLeftCell="' + ref(fz.c || 0, (fz.r || 0) + 1) + '" activePane="' + (fz.r && fz.c ? "bottomRight" : fz.r ? "bottomLeft" : "topRight") + '" state="frozen"/>' : "";
         var xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
           '<dimension ref="A1:' + ref(Math.max(0, u.c2), Math.max(1, u.r2)) + '"/>' +
@@ -1875,8 +2272,8 @@
           '<sheetFormatPr defaultRowHeight="18"/>' + (cols.length ? "<cols>" + cols.join("") + "</cols>" : "") +
           "<sheetData>" + rows.join("") + "</sheetData>" +
           (s.filter ? '<autoFilter ref="' + ref(s.filter.c1, s.filter.r) + ":" + ref(s.filter.c2, Math.max(s.filter.r2 || 0, u.r2)) + '"/>' : "") +
-          (s.merges.length ? '<mergeCells count="' + s.merges.length + '">' + s.merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join("") + "</mergeCells>" : "") +
-          '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/></worksheet>';
+          (s.merges.length ? '<mergeCells count="' + s.merges.length + '">' + s.merges.map(function (m) { return '<mergeCell ref="' + m + '"/>'; }).join("") + "</mergeCells>" : "") + cfs.join("") + dvStr +
+          '<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>' + legacy + "</worksheet>";
         files["xl/worksheets/sheet" + (n + 1) + ".xml"] = xml;
         sheetsXml.push('<sheet name="' + X(s.name) + '" sheetId="' + (n + 1) + '" r:id="rId' + (n + 1) + '"/>');
         rels.push('<Relationship Id="rId' + (n + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (n + 1) + '.xml"/>');
@@ -1887,7 +2284,7 @@
         (numFmts.length ? '<numFmts count="' + numFmts.length + '">' + numFmts.join("") + "</numFmts>" : "") +
         '<fonts count="' + fonts.length + '">' + fonts.join("") + '</fonts><fills count="' + fills.length + '">' + fills.join("") + '</fills><borders count="' + bordersX.length + '">' + bordersX.join("") + "</borders>" +
         '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="' + xfs.length + '">' + xfs.join("") + "</cellXfs>" +
-        '<cellStyles count="1"><cellStyle name="標準" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+        '<cellStyles count="1"><cellStyle name="標準" xfId="0" builtinId="0"/></cellStyles>' + (dxfs.length ? '<dxfs count="' + dxfs.length + '">' + dxfs.join("") + "</dxfs>" : "") + "</styleSheet>";
       files["xl/workbook.xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
         '<bookViews><workbookView activeTab="' + data.cur + '"/></bookViews><sheets>' + sheetsXml.join("") + '</sheets><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>';
       files["xl/_rels/workbook.xml.rels"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' + rels.join("") +
@@ -1896,10 +2293,201 @@
         '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
       files["docProps/core.xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">' +
         "<dc:title>" + X(O.file() ? O.file().name : "") + "</dc:title><dc:creator>" + X(O.userName() || "SK Hub Office") + '</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">' + new Date().toISOString().replace(/\.\d+Z$/, "Z") + "</dcterms:created></cp:coreProperties>";
-      files["[Content_Types].xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      files["[Content_Types].xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="vml" ContentType="application/vnd.openxmlformats-officedocument.vmlDrawing"/>' +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
         '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' + ctypes.join("") + "</Types>";
       return files;
+    }
+    // ---------- 大きな部品（使うときだけ読み込む） ----------
+    function loadVendor(globalName, file) {
+      if (window[globalName]) return Promise.resolve(window[globalName]);
+      return O.loadVendor(file).then(function () {
+        if (!window[globalName]) throw new Error("vendor-missing: " + file);
+        return window[globalName];
+      });
+    }
+    function loadExcelJS() { return loadVendor("ExcelJS", "exceljs.min.js"); }
+    function loadSheetJS() { return loadVendor("XLSX", "xlsx.full.min.js"); }
+
+    // ---------- ExcelJS で、グラフも入りの .xlsx を書き出す ----------
+    //   いまの軽い書き出し（xlsxFiles）は、条件付き書式・入力規則・コメントをそのまま書ける。
+    //   ExcelJS はグラフを画像として置けるので、グラフのあるファイルだけこちらを使う。
+    function chartPng(ch) {
+      return new Promise(function (resolve) {
+        var img = new Image();
+        img.onload = function () {
+          var cv = document.createElement("canvas");
+          cv.width = Math.max(1, Math.round(ch.w * 2)); cv.height = Math.max(1, Math.round(ch.h * 2));
+          var g = cv.getContext("2d"); g.scale(2, 2); g.drawImage(img, 0, 0, ch.w, ch.h);
+          resolve(cv.toDataURL("image/png").split(",")[1]);
+        };
+        img.onerror = function () { resolve(null); };
+        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(chartSvg(ch, true));
+      });
+    }
+    function excelSheetName(name, i, used) {
+      var n = String(name || "Sheet" + (i + 1)).replace(/[\[\]:*?\/\\]/g, "_").replace(/^'+|'+$/g, "").slice(0, 31) || "Sheet" + (i + 1);
+      var base = n, k = 2;
+      while (used[n.toLowerCase()]) { n = (base.slice(0, 28) + " " + k++).slice(0, 31); }
+      used[n.toLowerCase()] = 1;
+      return n;
+    }
+    function excelFont(st) {
+      if (!st) return null;
+      var f = {}, any = false;
+      if (st.b) { f.bold = true; any = true; }
+      if (st.i) { f.italic = true; any = true; }
+      if (st.u) { f.underline = true; any = true; }
+      if (st.s) { f.strike = true; any = true; }
+      if (st.fs) { f.size = +st.fs; any = true; }
+      if (st.ff) { f.name = st.ff; any = true; }
+      var c = hex6(st.fg); if (c) { f.color = { argb: c }; any = true; }
+      return any ? f : null;
+    }
+    function excelFill(st) {
+      var c = st && hex6(st.bg);
+      return c ? { type: "pattern", pattern: "solid", fgColor: { argb: c } } : null;
+    }
+    function excelBorder(st) {
+      if (!st || !st.bd) return null;
+      var out = {}, any = false;
+      [["t", "top"], ["r", "right"], ["b", "bottom"], ["l", "left"]].forEach(function (x) {
+        var w = st.bd[x[0]];
+        if (!w) return;
+        out[x[1]] = { style: w > 1 ? "medium" : "thin", color: { argb: "FF1F2328" } }; any = true;
+      });
+      return any ? out : null;
+    }
+    function excelAlign(st) {
+      if (!st) return null;
+      var a = {}, any = false;
+      if (st.al) { a.horizontal = { l: "left", c: "center", r: "right" }[st.al]; any = true; }
+      if (st.va) { a.vertical = { t: "top", m: "middle", b: "bottom" }[st.va]; any = true; }
+      if (st.wrap) { a.wrapText = true; any = true; }
+      return any ? a : null;
+    }
+    function excelApply(cell, st) {
+      if (!st) return;
+      var f = excelFont(st); if (f) cell.font = f;
+      var fl = excelFill(st); if (fl) cell.fill = fl;
+      var bd = excelBorder(st); if (bd) cell.border = bd;
+      var al = excelAlign(st); if (al) cell.alignment = al;
+      if (st.nf) cell.numFmt = st.nf;
+    }
+    function excelCfStyle(color) {
+      var c = hex6(color || "#fde68a");
+      return c ? { fill: { type: "pattern", pattern: "solid", bgColor: { argb: c } } } : undefined;
+    }
+    function excelFormula(src) {
+      var f = fileFormula(String(src).replace(/^=/, ""));
+      return f;
+    }
+    function excelJsFiles() {
+      return loadExcelJS().then(function (ExcelJS) {
+        var wb = new ExcelJS.Workbook(), used = {}, images = [];
+        wb.creator = O.userName() || "SK Hub Office";
+        wb.created = new Date();
+        // グラフの画像を先に作る（シートを組み立てながらでもよいが、待つものをまとめる）
+        data.sheets.forEach(function (s) { (s.charts || []).forEach(function (ch) { images.push(chartPng(ch)); }); });
+        return Promise.all(images).then(function (pngs) {
+          var pi = 0;
+          data.sheets.forEach(function (s, n) {
+            var ws = wb.addWorksheet(excelSheetName(s.name, n, used), { properties: { defaultRowHeight: 18 } });
+            var b = Book(data), maxC = 0, maxR = 0;
+            Object.keys(s.cells).forEach(function (k) {
+              var p = parseRef(k); if (!p) return;
+              maxC = Math.max(maxC, p.c + 1); maxR = Math.max(maxR, p.r);
+              var raw = s.cells[k], cell = ws.getCell(k.replace(/\$/g, "")), st = s.style[k] || EMPTY, v;
+              if (typeof raw === "string" && raw.charAt(0) === "=" && raw.length > 1) {
+                v = b.val(n, p.c, p.r);
+                var result;
+                if (F.isErr(v)) result = { error: v.err };
+                else if (v === null || v === undefined) result = "";
+                else if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") result = v;
+                else result = String(v);
+                cell.value = { formula: excelFormula(raw), result: result };
+              } else {
+                v = b.val(n, p.c, p.r);
+                if (v === null || v === undefined) v = "";
+                else if (F.isErr(v)) v = v.err;
+                else if (typeof v === "string" && raw.charAt(0) === "'") v = raw.slice(1);
+                else if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") v = v;
+                else v = String(v);
+                cell.value = v;
+              }
+              excelApply(cell, st);
+            });
+            // 行の高さ・列の幅（アプリの px を、Excel の pt・文字数に直す）
+            Object.keys(s.cw || {}).forEach(function (c) { ws.getColumn(+c + 1).width = Math.max(1, Math.round((s.cw[c] - 5) / 7 * 100) / 100); });
+            Object.keys(s.rh || {}).forEach(function (r) { ws.getRow(+r).height = Math.max(1, Math.round(s.rh[r] * 4 / 3 * 100) / 100); });
+            // グラフ（画像を、その範囲の左上に置く）
+            (s.charts || []).forEach(function (ch) {
+              var b64 = pngs[pi++]; if (!b64) return;
+              var id = wb.addImage({ base64: b64, extension: "png" });
+              var g = parseRange(ch.ref) || { c1: 0, r1: 1 };
+              ws.addImage(id, { tl: { col: g.c1, row: Math.max(0, g.r1 - 1) }, ext: { width: Math.max(1, ch.w), height: Math.max(1, ch.h) }, editAs: "oneCell" });
+            });
+            // コメント
+            Object.keys(s.notes || {}).forEach(function (k) {
+              var nt = s.notes[k], p = parseRef(k);
+              if (!p || !nt || !nt.text) return;
+              ws.getCell(k).note = { texts: [{ text: String(nt.text) }], author: nt.author || O.userName() || "SK Hub Office" };
+            });
+            // 入力規則
+            (s.dv || []).forEach(function (rule) {
+              var g = parseRange(rule.ref); if (!g) return;
+              var f1 = String(rule.f1 === undefined || rule.f1 === null ? "" : rule.f1).trim().replace(/^=/, ""), f2 = String(rule.f2 === undefined || rule.f2 === null ? "" : rule.f2).trim().replace(/^=/, "");
+              if (!f1) return;
+              if (rule.type === "list" && !parseRange(f1)) f1 = '"' + f1.replace(/"/g, '""') + '"';
+              var dv = {
+                type: rule.type || "list", allowBlank: rule.allowBlank !== false,
+                formulae: f2 ? [f1, f2] : [f1], showErrorMessage: true,
+                errorStyle: /^(stop|warning|information)$/.test(rule.style) ? rule.style : "stop"
+              };
+              if (rule.type !== "list" && rule.type !== "custom") dv.operator = rule.op || "between";
+              if (rule.prompt || rule.promptTitle) { dv.showInputMessage = true; if (rule.promptTitle) dv.promptTitle = rule.promptTitle; if (rule.prompt) dv.prompt = rule.prompt; }
+              if (rule.errTitle) dv.errorTitle = rule.errTitle;
+              if (rule.err) dv.error = rule.err;
+              ws.getCell(rule.ref.split(":")[0]).dataValidation = dv;
+            });
+            // 条件付き書式
+            (s.cf || []).forEach(function (rule) {
+              var g = parseRange(rule.ref); if (!g) return;
+              var style = excelCfStyle(rule.color), target = F.parseNum(rule.v), first = ref(g.c1, g.r1), rng = rangeText(g), model;
+              if (rule.type === "gt" || rule.type === "lt" || rule.type === "eq") {
+                if (target === null && rule.type !== "eq") return;
+                var f = target !== null ? String(target) : '"' + String(rule.v || "").replace(/"/g, '""') + '"';
+                model = { type: "cellIs", operator: { gt: "greaterThan", lt: "lessThan", eq: "equal" }[rule.type], formulae: [f], style: style };
+              } else if (rule.type === "text") {
+                model = { type: "containsText", operator: "containsText", text: String(rule.v || ""), formulae: ['NOT(ISERROR(SEARCH("' + String(rule.v || "").replace(/"/g, '""') + '",' + first + ")))"], style: style };
+              } else if (rule.type === "dup") {
+                // ExcelJS は duplicateValues をまだ書けないので、同じ意味の数式にする（読みこむときに dup に戻す）
+                model = { type: "expression", formulae: ["COUNTIF(" + rng + "," + first + ")>1"], style: style };
+              } else if (rule.type === "bar") {
+                model = { type: "dataBar", cfvo: [{ type: "min" }, { type: "max" }], color: { argb: hex6(rule.color || "#93c5fd") || "FF93C5FD" } };
+              } else if (rule.type === "scale") {
+                model = { type: "colorScale", cfvo: [{ type: "min" }, { type: "percentile", value: 50 }, { type: "max" }], color: [{ argb: "FFF8696B" }, { argb: "FFFFEB84" }, { argb: "FF63BE7B" }] };
+              }
+              if (model) ws.addConditionalFormatting({ ref: rangeText(g), rules: [model] });
+            });
+            // 結合・固定・フィルター・目盛線
+            (s.merges || []).forEach(function (m) { var g = parseRange(m); if (g) ws.mergeCells(g.c1 + 1, g.r1, g.c2 + 1, g.r2); });
+            if (s.filter) {
+              var fg = parseRange(ref(s.filter.c1, s.filter.r) + ":" + ref(s.filter.c2, Math.max(s.filter.r2 || 0, maxR)));
+              if (fg) ws.autoFilter = rangeText(fg);
+            }
+            var top = s.freeze ? s.freeze.r : 0, left = s.freeze ? s.freeze.c : 0;
+            var view = { showGridLines: s.grid !== false, tabSelected: n === data.cur };
+            if (top || left) {
+              view.state = "frozen"; view.xSplit = left; view.ySplit = top; view.topLeftCell = ref(left, top + 1);
+              view.activePane = top && left ? "bottomRight" : top ? "bottomLeft" : "topRight";
+            }
+            ws.views = [view];
+            ws.pageSetup.margins = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
+          });
+          return wb.xlsx.writeBuffer();
+        });
+      });
     }
     function exportAs(id) {
       if (id === "csv") {
@@ -1909,6 +2497,11 @@
       if (id === "xlsx") {
         return Zip.write(xlsxFiles()).then(function (b) {
           return O.saveBlob(O.fileName(".xlsx"), new Blob([b], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), t("Excel ブック"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx");
+        });
+      }
+      if (id === "xlsx-charts") {
+        return excelJsFiles().then(function (buf) {
+          return O.saveBlob(O.fileName(".xlsx"), new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), t("Excel ブック（グラフ付き）"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".xlsx");
         });
       }
     }
@@ -1923,6 +2516,19 @@
     }
     var BUILTIN_NF = { 1: "0", 2: "0.00", 3: "#,##0", 4: "#,##0.00", 5: "¥#,##0", 6: "¥#,##0", 7: "¥#,##0.00", 8: "¥#,##0.00", 9: "0%", 10: "0.00%", 11: "0.00E+00", 14: "yyyy/m/d", 15: "d-mmm-yy", 16: "d-mmm", 17: "mmm-yy", 18: "h:mm AM/PM", 19: "h:mm:ss AM/PM", 20: "h:mm", 21: "h:mm:ss", 22: "yyyy/m/d h:mm", 31: "yyyy年m月d日", 32: "h時mm分", 33: "h時mm分ss秒", 37: "#,##0", 38: "#,##0", 39: "#,##0.00", 40: "#,##0.00", 49: "@", 55: "yyyy年m月d日", 56: "m月d日", 57: "yyyy年m月d日", 58: "m月d日" };
     function argb(node) { var c = node && node.getAttribute("rgb"); return c && /^[0-9a-f]{8}$/i.test(c) ? "#" + c.slice(2).toLowerCase() : null; }
+    // 相対のつながり（../comments1.xml など）を、ZIP の中の道に直す
+    function resolvePart(base, target) {
+      if (/^\//.test(target)) return target.replace(/^\/+/, "");
+      var parts = (base + target).split("/"), out = [];
+      parts.forEach(function (x) { if (x === "..") out.pop(); else if (x !== "." && x !== "") out.push(x); });
+      return out.join("/");
+    }
+    // 日付の入力規則は、ファイルの中では 1899/12/30 からの数。読むときに yyyy/m/d に戻す
+    function dvNumText(type, v) {
+      if (type !== "date" || v === "" || !/^-?\d+(\.\d+)?$/.test(String(v).trim())) return v;
+      var n = +v;
+      return n >= 1 && n < 2958466 ? F.format(n, "yyyy/m/d").text : v;
+    }
     function readXlsx(file) {
       if (!Zip.canRead) return Promise.reject(new Error("no-inflate"));
       return Zip.read(file).then(function (z) {
@@ -1931,7 +2537,7 @@
         var relsDoc = Zip.xml(z["xl/_rels/workbook.xml.rels"]), relMap = {};
         kids(relsDoc, "Relationship").forEach(function (r) { relMap[r.getAttribute("Id")] = r.getAttribute("Target"); });
         var shared = kids(Zip.xml(z["xl/sharedStrings.xml"]), "si").map(textOf);
-        var styles = Zip.xml(z["xl/styles.xml"]), nfMap = {}, fonts = [], fillsL = [], bds = [], xfs = [];
+        var styles = Zip.xml(z["xl/styles.xml"]), nfMap = {}, fonts = [], fillsL = [], bds = [], xfs = [], dxfFill = [];
         if (styles) {
           kids(kid(styles, "numFmts"), "numFmt").forEach(function (n) { nfMap[n.getAttribute("numFmtId")] = n.getAttribute("formatCode"); });
           kids(kid(styles, "fonts"), "font").forEach(function (f) {
@@ -1969,6 +2575,8 @@
             }
             xfs.push(o);
           });
+          // 条件付き書式の色（dxf の塗りつぶし）
+          kids(kid(styles, "dxfs"), "dxf").forEach(function (d) { var p = kid(d, "patternFill"); dxfFill.push(p ? argb(kid(p, "bgColor")) || argb(kid(p, "fgColor")) : null); });
         }
         var out = { v: 2, cur: 0, sheets: [] };
         kids(wb, "sheet").forEach(function (sn, n) {
@@ -2009,10 +2617,58 @@
           });
           kids(doc, "row").forEach(function (r) { var ht = +r.getAttribute("ht"); if (ht && r.getAttribute("customHeight") === "1") s.rh[+r.getAttribute("r")] = Math.round(ht * 4 / 3); });
           kids(doc, "mergeCell").forEach(function (m) { var g = parseRange(m.getAttribute("ref")); if (g) s.merges.push(rangeText(g)); });
+          // 入力規則
+          kids(doc, "dataValidation").forEach(function (dv) {
+            var sq = (dv.getAttribute("sqref") || "").split(/\s+/).filter(Boolean)[0], g = parseRange(sq);
+            var type = dv.getAttribute("type") || "any";
+            if (!g || ["list", "whole", "decimal", "date", "textLength", "custom"].indexOf(type) < 0) return;
+            var f1El = kid(dv, "formula1"), f2El = kid(dv, "formula2"), f1 = f1El ? f1El.textContent : "", f2 = f2El ? f2El.textContent : "";
+            if (type === "list" && /^".*"$/.test(f1)) f1 = f1.slice(1, -1).replace(/""/g, '"');
+            s.dv.push({ ref: rangeText(g), type: type, op: dv.getAttribute("operator") || "between", f1: dvNumText(type, f1), f2: dvNumText(type, f2),
+              allowBlank: dv.getAttribute("allowBlank") !== "0",
+              promptTitle: dv.getAttribute("promptTitle") || "", prompt: dv.getAttribute("prompt") || "",
+              errTitle: dv.getAttribute("errorTitle") || "", err: dv.getAttribute("error") || "",
+              style: /^(stop|warning|information)$/.test(dv.getAttribute("errorStyle")) ? dv.getAttribute("errorStyle") : "stop" });
+          });
+          // セルのコメント（ワークシートの rels → comments）。VML は読まなくてよい
+          var dir = target.replace(/[^\/]+$/, ""), baseName = target.slice(dir.length);
+          var wrel = Zip.xml(z["xl/" + dir + "_rels/" + baseName + ".rels"]), commentsPart = null;
+          if (wrel) kids(wrel, "Relationship").forEach(function (r) {
+            if (/\/comments$/.test(r.getAttribute("Type") || "")) commentsPart = resolvePart("xl/" + dir, r.getAttribute("Target") || "");
+          });
+          var cdoc = commentsPart && Zip.xml(z[commentsPart]);
+          if (cdoc) {
+            var authors = kids(cdoc, "author").map(function (a) { return a.textContent; });
+            kids(cdoc, "comment").forEach(function (cm) {
+              var rf = cm.getAttribute("ref"), tx = textOf(kid(cm, "text")), aid = +cm.getAttribute("authorId");
+              if (rf && parseRef(rf) && tx) s.notes[rf] = { text: tx, author: authors[aid] || "", ts: Date.now() };
+            });
+          }
           var pane = kid(doc, "pane");
           if (pane && pane.getAttribute("state") === "frozen") s.freeze = { r: +pane.getAttribute("ySplit") || 0, c: +pane.getAttribute("xSplit") || 0 };
           var sv = kid(doc, "sheetView");
           if (sv && sv.getAttribute("showGridLines") === "0") s.grid = false;
+          // 条件付き書式（Sheet で描けるものだけ）
+          kids(doc, "conditionalFormatting").forEach(function (cf) {
+            (cf.getAttribute("sqref") || "").split(/\s+/).forEach(function (sq) {
+              var g = parseRange(sq);
+              if (!g) return;
+              kids(cf, "cfRule").forEach(function (rule) {
+                var tp = rule.getAttribute("type"), op = rule.getAttribute("operator"), fe = kid(rule, "formula"), fx = fe ? fe.textContent : "";
+                var color = dxfFill[+rule.getAttribute("dxfId")] || undefined, o = null;
+                if (tp === "cellIs" && /^(greaterThan|lessThan|equal)$/.test(op)) o = { type: { greaterThan: "gt", lessThan: "lt", equal: "eq" }[op], v: /^".*"$/.test(fx) ? fx.slice(1, -1).replace(/""/g, '"') : fx };
+                else if (tp === "containsText") o = { type: "text", v: rule.getAttribute("text") || "" };
+                else if (tp === "duplicateValues") o = { type: "dup" };
+                else if (tp === "expression" && /COUNTIF\s*\(/i.test(fx) && /\)\s*>\s*1\s*$/.test(fx)) o = { type: "dup" };
+                else if (tp === "dataBar") { o = { type: "bar" }; color = argb(kids(rule, "color")[0]) || undefined; }
+                else if (tp === "colorScale") { o = { type: "scale" }; color = undefined; }
+                if (!o) return;
+                o.ref = rangeText(g);
+                if (color) o.color = color;
+                s.cf.push(o);
+              });
+            });
+          });
           out.sheets.push(s);
         });
         if (!out.sheets.length) out.sheets.push(fixSheet({ name: "Sheet1" }, 0));
@@ -2021,8 +2677,113 @@
         return out;
       });
     }
+    // .xls・.xlsb・.ods・.fods（と、読めなかった .xlsx）を SheetJS で読む。
+    //   値・数式・結合・列の幅・行の高さ・コメント・入力規則・フィルターを読む。
+    //   SheetJS CE は細かい書式（フォント・塗り）をあまり返さないので、取れたものだけ使う。
+    function jsColor(c) {
+      if (!c) return null;
+      var s = c.rgb ? String(c.rgb) : "";
+      if (/^[0-9a-f]{8}$/i.test(s)) return "#" + s.slice(2).toLowerCase();
+      if (/^[0-9a-f]{6}$/i.test(s)) return "#" + s.toLowerCase();
+      return null;
+    }
+    function jsStyle(cell) {
+      var cs = cell.s || {}, st = {}, font = cs.font || {}, fill = cs.fill || {}, al = cs.alignment || {}, bd = cs.border || {};
+      if (font.bold) st.b = 1;
+      if (font.italic) st.i = 1;
+      if (font.underline) st.u = 1;
+      if (font.strike) st.s = 1;
+      if (font.sz) st.fs = +font.sz;
+      if (font.name) st.ff = font.name;
+      var fg = jsColor(font.color); if (fg) st.fg = fg;
+      if (fill.patternType === "solid") { var bg = jsColor(fill.fgColor) || jsColor(fill.bgColor); if (bg) st.bg = bg; }
+      [["top", "t"], ["right", "r"], ["bottom", "b"], ["left", "l"]].forEach(function (x) {
+        var side = bd[x[0]];
+        if (side && side.style) { st.bd = st.bd || {}; st.bd[x[1]] = /medium|thick|double/.test(side.style) ? 2 : 1; }
+      });
+      if (al.horizontal === "left" || al.horizontal === "center" || al.horizontal === "right") st.al = al.horizontal.charAt(0);
+      if (al.vertical === "top" || al.vertical === "center") st.va = al.vertical === "top" ? "t" : "m";
+      if (al.wrapText) st.wrap = 1;
+      var nf = cell.z && cell.z !== "General" ? String(cell.z).replace(/\[\$-[0-9A-F]+\]/gi, "").replace(/\\/g, "") : "";
+      if (nf) st.nf = nf;
+      return Object.keys(st).length ? st : null;
+    }
+    function jsDateText(v, nf) {
+      var d = v instanceof Date ? v : new Date(v);
+      if (!isFinite(d.getTime())) return "";
+      var text = d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+      if (/[hs]/i.test(nf || "")) text += " " + ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) + (/(?:ss|s\b)/i.test(nf || "") ? ":" + ("0" + d.getSeconds()).slice(-2) : "");
+      return text;
+    }
+    function readSheetJs(file) {
+      return loadSheetJS().then(function (XLSX) {
+        return file.arrayBuffer().then(function (ab) {
+          var wb = XLSX.read(new Uint8Array(ab), { type: "array", cellStyles: true, cellDates: true, cellNF: true, cellFormula: true, sheetStubs: true });
+          var out = { v: 2, cur: 0, sheets: [] };
+          (wb.SheetNames || []).forEach(function (name, n) {
+            var ws = wb.Sheets[name] || {}, s = fixSheet({ name: name || "Sheet" + (n + 1) }, n);
+            Object.keys(ws).forEach(function (k) {
+              if (k.charAt(0) === "!") return;
+              var p = parseRef(k), cell = ws[k];
+              if (!p || !cell) return;
+              var raw;
+              if (cell.f) raw = "=" + String(cell.f).replace(/_xlfn\.(_xlws\.)?/g, "");
+              else if (cell.t === "s" || cell.t === "str") raw = String(cell.v === undefined || cell.v === null ? "" : cell.v);
+              else if (cell.t === "b") raw = cell.v ? "TRUE" : "FALSE";
+              else if (cell.t === "e") raw = String(cell.w || cell.v || "");
+              else if (cell.t === "d") raw = jsDateText(cell.v, cell.z);
+              else if (cell.t === "n") {
+                var num = +cell.v;
+                raw = cell.z && F.isDateFormat(cell.z) && num >= 1 && num < 2958466 && Math.floor(num) === num ? F.format(num, "yyyy/m/d").text : F.str(num);
+              } else raw = cell.v === undefined || cell.v === null ? "" : String(cell.v);
+              if (raw === "") return;
+              if (!cell.f && (cell.t === "s" || cell.t === "str") && (/^[=+\-']/.test(raw) || F.parseNum(raw) !== null || /^(TRUE|FALSE)$/i.test(raw))) raw = "'" + raw;
+              s.cells[k] = raw;
+              var st = jsStyle(cell); if (st) s.style[k] = st;
+              if (cell.c) {
+                var cs = Array.isArray(cell.c) ? cell.c : [cell.c];
+                cs.forEach(function (cm) {
+                  if (cm && (cm.t || cm.h)) s.notes[k] = { text: String(cm.t || cm.h || ""), author: String(cm.a || ""), ts: Date.now() };
+                });
+              }
+            });
+            if (ws["!merges"]) ws["!merges"].forEach(function (m) {
+              if (m && m.s && m.e) s.merges.push(rangeText({ c1: m.s.c, r1: m.s.r + 1, c2: m.e.c, r2: m.e.r + 1 }));
+            });
+            (ws["!cols"] || []).forEach(function (c, i) {
+              if (!c) return;
+              var w = c.wpx ? c.wpx : c.wch ? Math.round(c.wch * 7 + 5) : c.width ? Math.round(c.width * 7 + 5) : 0;
+              if (w) s.cw[i] = Math.max(16, w);
+            });
+            (ws["!rows"] || []).forEach(function (r, i) {
+              if (!r) return;
+              var h = r.hpx ? r.hpx : r.hpt ? Math.round(r.hpt * 4 / 3) : 0;
+              if (h) s.rh[i] = h;
+            });
+            if (ws["!autofilter"] && ws["!autofilter"].ref) {
+              var fg = parseRange(ws["!autofilter"].ref);
+              if (fg) s.filter = { r: fg.r1, c1: fg.c1, c2: fg.c2, r2: fg.r2 };
+            }
+            var fz = ws["!freeze"];
+            if (fz) {
+              if (typeof fz === "string") { var fzr = parseRange(fz); if (fzr) s.freeze = { r: fzr.r1 - 1, c: fzr.c1 }; }
+              else s.freeze = { r: +fz.ySplit || 0, c: +fz.xSplit || 0 };
+            }
+            out.sheets.push(s);
+          });
+          if (!out.sheets.length) out.sheets.push(fixSheet({ name: "Sheet1" }, 0));
+          var view = wb.Workbook && wb.Workbook.WBView && wb.Workbook.WBView[0];
+          if (view && view.activeTab !== undefined) out.cur = Math.min(out.sheets.length - 1, +view.activeTab || 0);
+          return out;
+        });
+      });
+    }
     function importFile(file) {
-      if (/\.xlsx$/i.test(file.name)) return readXlsx(file);
+      if (/\.(xlsx|xlsm)$/i.test(file.name)) {
+        if (!Zip.canRead) return readSheetJs(file);
+        return readXlsx(file).catch(function () { return readSheetJs(file); });
+      }
+      if (/\.(xls|xlsb|ods|fods)$/i.test(file.name)) return readSheetJs(file);
       return file.arrayBuffer().then(function (ab) {
         var u8 = new Uint8Array(ab), text;
         try { text = new TextDecoder("utf-8", { fatal: true }).decode(u8); } catch (e) { text = new TextDecoder("shift_jis").decode(u8); }
@@ -2119,10 +2880,11 @@
       afterPrint: afterPrint,
       exports: [
         { id: "xlsx", icon: "table_view", label: t("Excel ブック（.xlsx）"), desc: t("Microsoft Excel・LibreOffice・Google スプレッドシートで開けます") },
+        { id: "xlsx-charts", icon: "insert_chart", label: t("Excel ブック（グラフ付き .xlsx）"), desc: t("グラフを画像として入れます。少し時間がかかります") },
         { id: "csv", icon: "csv", label: "CSV（.csv）", desc: t("いまのシートの値を、カンマで区切った文字にします") }
       ],
       exportAs: exportAs,
-      imports: { label: ".xlsx・.csv", accept: ".xlsx,.csv,.tsv,.txt" },
+      imports: { label: ".xlsx・.xlsm・.xls・.xlsb・.ods・.csv", accept: ".xlsx,.xlsm,.xls,.xlsb,.ods,.fods,.csv,.tsv,.txt" },
       importFile: importFile,
       props: function () {
         var n = 0;

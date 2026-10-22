@@ -2,7 +2,7 @@
 
 文書の **Doc**・表計算の **Sheet**・スライドの **Slide** をまとめた、SK のオフィスアプリです。開くのは **https://office.sk-hub.jp/**（開発中・検索には載せない）。紹介ページは https://sk-hub.jp/products/office/ 。
 
-目標は「Microsoft Office ほどではないけれど、LibreOffice くらいの機能はそろえる」こと。画面の形は Microsoft Office、見た目は SK Material（Google の Material Design 3 がもと）。
+目標は「LibreOffice くらいの機能をそろえて、Google Workspace のように、クラウドに保存・共有・同時に編集できる」こと（下の「決めたこと」）。画面の形は Microsoft Office、見た目は SK Material（Google の Material Design 3 がもと）。
 
 ---
 
@@ -26,11 +26,27 @@ python -m http.server 8765
   `navigator.storage.getDirectory()` で作ったフォルダを、IndexedDB `sk_office` の `kv` に `folder` という名前で入れて、ページを開き直す
 - 書き出したファイル（.docx・.xlsx・.pptx）は、ZIP の中の XML がこわれていないか・つながり（rels）が合っているかを確かめる。.pptx は python-pptx で開けるかも確かめた
 
+### テスト（書き出し・読み込み・Sheet の表示）
+
+```
+python _tests/office/run.py            （Doc・Sheet・Slide を全部。--only sheet で 1 つだけ）
+```
+
+Edge か Chrome を見えないまま開いて、テンプレートと `_tests/office/fixtures.js`（できることを詰めこんだファイル）を 1 つずつ書き出し、
+
+1. ZIP・XML・つながり（rels）・`[Content_Types].xml` を確かめる（`run.js`。ブラウザの中）
+2. 書き出したファイルを読みこみなおして、文字・セルの値・脚注・コメント・ノート・条件付き書式が残っているかを確かめる（`run.js`）
+3. 要素の順番（Word・Excel・PowerPoint は順番がちがうと開けない）・Excel にないエラー・`_xlfn.` を確かめ、.pptx は python-pptx で開く（`check.py`）
+4. Sheet の 2 万行のファイルで、見えている行だけを作っているか・遠くのセルへ移れるか（`run.js` の virtualTest）
+5. `.docx` は、テストのときだけ入れる別の実装（`docx-preview`）でも開けるか、`docx`（dolanmiu）が作った本物の `wp:anchor` を読みこめるかを確かめる（`run.js` の docxOracle・thirdPartyAnchorTest）
+
+書き出したファイルは `_tests/office/out/` に残る（Word・LibreOffice で開いて見た目も確かめられる）。NG があると終了コード 1。書き出しを直したら、まずこれを動かす。新しい機能を足したら `fixtures.js` にも足す。`http://localhost:8765/_tests/office/` を開いても動く（`_` で始まるので公開されない）。`out` を Word で開いたままなどで消せないときは、`OFFICE_TEST_OUT` に別のフォルダを入れて動かす（`$env:OFFICE_TEST_OUT="_tests/office/out-tmp"`）
+
 ### 気をつけること
 
 - **ページの中の読み込み・リンクは相対パス**（`../shared/office.js`・`../doc/`）。office.sk-hub.jp では `/`、手元では `/office/` が Office のいちばん上になるため。サイトと共通の部品だけ `/assets/…`・`/toolbox/shared/…` と書く（`_workers/office/src/worker.js` の `SHARED`）。
 - **sk-hub.jp/office/ を開くと office.sk-hub.jp に移る**（各ページの `<head>` の最初のスクリプト）。手元（localhost）では移らない。
-- **サービスワーカー**（`office/sw.js`）: 画面の部品を足したら `SHELL` に入れ、大きく変えたら `VERSION` を上げる（いまは `sk-office-v6`）。sk-hub.jp のものはネットを先に使うので、ふだんはそのままで新しいものが出る。
+- **サービスワーカー**（`office/sw.js`）: 画面の部品を足したら `SHELL` に入れ、大きく変えたら `VERSION` を上げる（いまは `sk-office-v12`）。sk-hub.jp のものはネットを先に使うので、ふだんはそのままで新しいものが出る。
 - **ファイルの中身の形を変えるとき**は、`store.js` の `FILE_VERSION`（いまは 2）を上げて、古い形も読めるようにする（各アプリの `upgrade`。使う人の PC に古いファイルが残っている）。
 - **アプリの中身は、アプリのファイルに書く**。`office.js` は画面の枠（スタート画面・タイトルバー・リボン・ステータスバー・元に戻す・保存・検索の欄・印刷）だけ。アプリには道具 `O` を渡す（`office.js` の「アプリに渡す道具」）。
 - **まだできないボタン**は `todo: 1`（リボン）か `data-todo="名前"` を付けておくと、押したときに「まだ使えません」と出る。
@@ -56,12 +72,15 @@ python -m http.server 8765
 ### Doc（`doc.js`）
 
 - フォント・大きさ・太字・斜体・下線・取り消し線・上付き・下付き・文字の色・蛍光ペン・書式のクリア・書式のコピー
-- 箇条書き・段落番号・インデント・揃え・行間、スタイル（標準・表題・見出し 1・見出し 2・引用）
-- 表（マス目で大きさを選ぶ。行・列の挿入と削除・見出しの行・塗りつぶし・右のセルと結合。Tab で次のセル）
+- 箇条書き・段落番号・インデント・揃え・行間、段落の前後の間隔、スタイル（標準・表題・見出し 1・見出し 2・引用）と自作のスタイル（もとにするスタイルと書式を決めて作る・変える・消す）
+- 表（マス目で大きさを選ぶ。行・列の挿入と削除・見出しの行・塗りつぶし・右のセルと結合・罫線・列の幅。Tab で次のセル）
 - 画像（ファイル・貼り付け・ドラッグ。大きさ・回り込み・代替テキスト）、グラフ（データを貼って作る・ダブルクリックで直す）、リンク、横線、日付、記号、改ページ
 - 用紙（A4・B5・A3・Letter、縦・横、余白、段組み）、**縦書き**、ヘッダー・フッター・ページ番号（印刷したとき）、ページの区切りの線
 - 目次（見出しから作る・更新）、脚注、コメント（右の欄）、ナビゲーション（見出しの一覧）、スペル チェック（ブラウザの機能）、文字カウント
 - 読み込み: `.docx`・`.html`・`.md`・`.txt` / 書き出し: `.docx`・`.html`・`.md`・`.txt`・PDF
+- `.docx` の脚注・コメントは、Word の脚注（`footnotes.xml`）・コメント（`comments.xml`）として書き出し・読み込みする
+- `.docx` にフォントが埋め込まれている（`word/fontTable.xml`・`word/fonts/*.odttf`）ときは、`opentype.js` でフォントを読み、画面でも同じフォントで出す。行間はフォントの ascent/descent/lineGap から Word に近い値にする（読めないときは今までどおり 1.15）
+- 図の自由配置（`data-anc`）は、書き出すときも Word の `wp:anchor`＋`wp:wrapNone`（column / paragraph 基準）で残す。表のセルの中の画像は今までどおり行内
 
 ### Sheet（`sheet.js`。計算は `formula.js`）
 
@@ -71,19 +90,41 @@ python -m http.server 8765
 - 書式（フォント・大きさ・太字など・文字と塗りの色・罫線・揃え・折り返し・結合）、表示形式（桁区切り・通貨・%・日付・時刻・ユーザー定義・小数の桁）、列の幅（ドラッグ・ダブルクリックで合わせる）・行の高さ
 - 行・列の挿入と削除（数式の参照も直す）、複数のシート（追加・名前の変更・複製・移動・削除）、ウィンドウ枠の固定、目盛線
 - 並べ替え・フィルター・重複の削除・条件付き書式（大きい・小さい・等しい・文字を含む・重複・データ バー・カラー スケール）
+- 入力規則（リスト・数値・日付・文字の長さ。止める・警告・情報から選ぶ）、セルのコメント（赤い三角・Shift+F2）
 - グラフ（縦棒・横棒・折れ線・面・円・散布図。表の上に置いて動かす・大きさを変える・PNG で保存）
 - ステータスバーに平均・個数・合計
-- 読み込み: `.xlsx`（値・数式・主な書式・列の幅・結合・固定）・`.csv` / 書き出し: `.xlsx`・`.csv`・PDF
+- 読み込み: `.xlsx`（値・数式・主な書式・列の幅・結合・固定・条件付き書式・入力規則・コメント）・`.csv` / 書き出し: `.xlsx`（条件付き書式・入力規則・コメントも。新しい関数には `_xlfn.` を付ける）・`.csv`・PDF
+- 表は、見えている行と上下 40 行だけを作る（`renderWindow`。上と下は高さだけの空の行）。2 万行でも開くのは一瞬、作るセルは 2,000 ほど
 
 ### Slide（`slide.js`）
 
 - レイアウト（タイトル・タイトルとコンテンツ・2 つのコンテンツ・セクション見出し・タイトルのみ・白紙）の文字をそのまま書きかえる
 - テキスト ボックス・図形（9 種類）・画像・グラフを自由に置く。ドラッグで動かす・角で大きさを変える・上の丸で回す・ほかのものや真ん中に合わせる線・重なり順・整列・複製・コピーと貼り付け・矢印で少しずつ動かす
+- グループ化・グループ解除（Ctrl+G / Ctrl+Shift+G。グループのまま動かす・大きさを変える・回す）、図形の線の太さ
 - テーマ（みかん・海・抹茶・さくら・モノクロ・夜）、背景の色、スライドのサイズ（16:9・4:3）
 - 画面切り替え（フェード・プッシュ・ズーム）、アニメーション（フェード・スライドイン・ズーム。順に出す）
 - スライドの並べかえ（ドラッグ）・複製・削除・右クリックのメニュー、ノート
 - スライド ショー（F5）と**発表者ビュー**（P。いまのスライド・次のスライド・ノート・時間）、B で画面を黒く
-- 読み込み: `.pptx`（文字・図形・画像・ノート）・`.txt`（アウトライン） / 書き出し: `.pptx`・アウトライン（`.txt`）・PDF
+- 読み込み: `.pptx`（文字・図形・画像・ノート・グループ・線の太さ）・`.txt`（アウトライン） / 書き出し: `.pptx`（ノート・グループ・線の太さも）・アウトライン（`.txt`）・PDF
+
+### Google ドライブ（保存先の 1 つ。`drive.js`）
+
+- アカウントの「Google ドライブをつなぐ」か、開く・オプションの「Google ドライブ」で、自分の Google ドライブにつなぐ。新しいファイルの保存先を「この PC」と「Google ドライブ」で切りかえられる（`Store.place()`）
+- ドライブの「SK Hub Office」フォルダに、PC と同じ形のファイル（`名前.sksheet` など）を 1 つずつ保存する。権限は `drive.file` だけ（SK Hub Office で作った・開いたファイルしか見えない）。ファイルは SK のサーバーを通らない
+- ファイルの ID が `g:` で始まるものがドライブのファイル（`store.js` が ID で行き先を決める）。一覧は PC とドライブの両方を出す
+- 自動保存で続けて保存しても、送るのは「いま送っている分」と「いちばん新しい分」だけ。削除はドライブのごみ箱に入れる（30 日は戻せる）
+- ログイン（Google Identity Services のトークン）は 1 時間で切れる。切れたら「つなぎなおしますか？」と聞き、押したらつないで保存を続ける
+- **まだ動かない**: `drive.js` の `GOOGLE_CLIENT_ID` が空のあいだは「準備中」と出る。下の「Google ドライブを使えるようにする」をしてから入れる。テストは `drive-mock.js`（本物の代わりのドライブ）で行っていて、本物の Google ドライブではまだ試していない
+
+#### Google ドライブを使えるようにする（Google Cloud の設定。アカウントを持っている人が行う）
+
+1. [Google Cloud コンソール](https://console.cloud.google.com/) で、SK Hub Systems アカウントの Firebase と同じプロジェクトを選ぶ
+2. 「API とサービス」→「ライブラリ」で **Google Drive API** を有効にする
+3. 「Google Auth Platform」（前の名前は「OAuth 同意画面」）の「ブランディング」に、アプリの名前（SK Hub Office）・サポートのメール・ホームページ（https://sk-hub.jp/products/office/）・プライバシーポリシー（https://sk-hub.jp/policies/）・承認済みドメイン（sk-hub.jp）を入れる
+4. 「データアクセス」で、スコープ `https://www.googleapis.com/auth/drive.file` を足す（機密でないスコープなので、審査はブランディングの確認だけ）
+5. 「クライアント」で「ウェブ アプリケーション」のクライアントを作り、「承認済みの JavaScript 生成元」に `https://office.sk-hub.jp` と `http://localhost:8765` を入れる（リダイレクト URI はいらない）
+6. できたクライアント ID を `office/shared/drive.js` の `GOOGLE_CLIENT_ID` に入れる。入れる前に試すときは、ブラウザのコンソールで `localStorage.setItem("sk_office_google_client", "クライアント ID")` をして開きなおす
+7. 「対象」が「テスト中」のあいだは、テストユーザーに足した Google アカウントだけが使える。みんなに使ってもらうときは「アプリを公開」する
 
 ### SK Hub Systems アカウント（ログインだけ）
 
@@ -96,13 +137,14 @@ python -m http.server 8765
 ### まだのこと（弱いところ）
 
 - **office.sk-hub.jp でのログインの受け取りは、公開してから確かめる**（手元では同じ場所なので、bridge を通らない）
-- **Microsoft Office・LibreOffice で、書き出したファイルを開いて確かめていない**（XML とつながりは確かめた。.pptx は python-pptx で開けた）
+- **Microsoft Office・LibreOffice で、書き出したファイルを開いて確かめていない**。`_tests/office/` のテストで、ZIP・XML・つながり・要素の順番（書き出しでよく使う要素）・読みこみなおしは確かめている。`.docx` はテストのときだけ `docx-preview` でも開き、`docx`（dolanmiu）が作った本物のアンカー画像も読みこめる。.pptx は python-pptx で開ける。この PC に LibreOffice を入れれば、`soffice --headless --convert-to pdf` で開けるかもテストに足せる
 - 印刷は、印刷用の形を作るところまで確かめた。実際の印刷・PDF の見た目はまだ確かめていない
-- Doc は `contenteditable` と `document.execCommand`（古いしくみ）。変更の記録（校閲）・数式（KaTeX）・図形はない。.docx の細かい書式（段落の間隔・表の幅など）は変わることがある
-- Sheet は、作った行を全部画面に置く（下へスクロールすると足す）。何万行もあると重い。入力規則（リストから選ぶ）・ピボットテーブル・テーブル・セルのコメント・グラフの .xlsx への書き出しはない
-- Slide のグループ化・表・スライドマスター・図形の線の太さ・.pptx のノートとアニメーションの書き出しはない
+- Doc は `contenteditable` と `document.execCommand`（古いしくみ）。変更の記録（校閲）・数式（KaTeX）・図形はない。.docx の細かい書式（タブ・均等割り付けなど）は変わることがある。ページの区切りは、画面に線を引くだけ（ページごとのヘッダー・ページの下の脚注は、印刷のときだけ）
+- Doc の `.docx` 読み込みは、Word の見た目に近づけた（用紙の余白 `w:pgMar`、本文の既定のフォント・大きさ・行間 `docDefaults`、表題・見出し 1〜9・引用の組み込みスタイル、表の罫線 `tblBorders`・セルの余白 `tcMar`・列幅 `tblGrid`、図の重ね置き `wrapNone`）。埋め込みフォントは `opentype.js` で読み、画面のフォントと行間に使う。まだ合わないのは、表のスタイル（`tblStyle`）からの書式の継承、文字スタイル（`rStyle`）、均等割り付け・タブ位置の細かい指定。図の自由配置は `wp:anchor` で書き出すが、`wrapSquare`・`wrapTight` の回り込みの細かい位置はまだ残らない
+- Sheet の計算は、変えるたびにブック全体を計算しなおす（見えているセルだけ計算するので、表示は速い）。ピボットテーブル・テーブル・グラフの .xlsx への書き出しはない
+- Slide の表・スライドマスター・.pptx のアニメーションの書き出しはない
 - `.odt`・`.ods`・`.odp`（LibreOffice の形式）
-- 多言語の訳（新しく足した文は日本語だけ。訳のない文は `_build/i18n/missing/`）
+- 多言語の訳（Office の文はまだ日本語だけのものが多い。今回足した文は訳した。訳のない一覧は `_build/i18n/missing/`）
 
 ---
 
@@ -113,7 +155,7 @@ python -m http.server 8765
 - **公開**: ページは sk-hub.jp（GitHub Pages）の `office/` に置き、Cloudflare Worker（`_workers/office/`）が office.sk-hub.jp で中継する。直すときはプッシュするだけ（Worker の deploy は、Worker を直したときだけ）。
 - **画面**: 各ページ（`office/doc/index.html` など）は起動画面と入れ物だけ。スタート画面・エディタの枠は `office.js` が組み立て、エディタの中身はアプリのファイル（`doc.js` など）が作る。`<html data-app="doc|sheet|slide|hub">` でアプリを決める。
 - **アプリのファイル**: `window.OfficeApps[アプリ] = function (O) { return { ribbon, render, command, state, … } }`。`office.js` より先に読み込む。返すもの（`upgrade`・`thumb`・`find`・`replace`・`clip`・`key`・`beforePrint`・`exports`・`exportAs`・`imports`・`importFile` など）は `office.js` の中の使い方を見る。
-- **中身は自作**（決めた）: 外の部品（TipTap・HyperFormula・Konva など）は使わない。オフラインで動き、ライセンスを気にしなくてよく、SK らしい画面にしやすいため。Office のファイルの読み書きも自作（`zip.js` は ZIP、XML はブラウザの DOMParser）。
+- **画面と編集は自作**（決めた）: 画面を置きかえる大きな部品（TipTap・HyperFormula・Konva・Univer など）は使わない。オフラインで動き、SK らしい画面にしやすいため。Office のファイルの読み書きも基本は自作（`zip.js` は ZIP、XML はブラウザの DOMParser）。ただし、ファイルの忠実さを上げる小さな headless の部品は使う: Doc の埋め込みフォントに `opentype.js`（MIT、`shared/vendor/`）。テストだけに `docx`（MIT）・`docx-preview`（Apache-2.0）・`JSZip`（MIT/GPL のどちらか）を入れる（`_tests/office/vendor/`、配信しない）。
 - **色**: `office.css` の `:root[data-app="…"]` に M3 の色（`--md-*`）。Doc＝SK's Blue・Sheet＝SK's Matcha・Slide＝SK's Mikan。スライドのテーマは `.sl[data-theme]` の `--sl-*`（`slide.js` の `THEMES` と同じ値）。
 - **部品**: `/toolbox/shared/m3.css`（ボタン・スイッチ・ダイアログなど）と `/toolbox/shared/m3.js`（波紋、`M3.prompt`・`M3.choose`・`M3.confirm`・`M3.dialog`）。文字は M PLUS 1、アイコンは Material Symbols Rounded。
 
@@ -125,13 +167,16 @@ python -m http.server 8765
 | ファイル（ブラウザの中） | localStorage `sk_office_files` | `[{ id, app, name, tpl, created, updated, data }]` |
 | 選んだフォルダ・版の履歴 | IndexedDB `sk_office`（`kv` の `folder`・`v:ファイルの ID`） | FileSystemDirectoryHandle・`[{ ts, size, data }]` |
 | オプション | localStorage `sk_office_settings` | `{ theme, motion, autosave, user, pinned }` |
+| ファイル（Google ドライブ） | 使う人の Google ドライブの「SK Hub Office」フォルダ | フォルダのファイルと同じ JSON。`appProperties.skApp` にアプリ |
+| Google ドライブのログイン | localStorage `sk_office_drive` | `{ token, exp, email, name, folder, on }`（トークンは 1 時間で切れる） |
+| 新しいファイルの保存先 | localStorage `sk_office_place` | `"local"` か `"drive"` |
 | ログイン中かのヒント | localStorage `skhub_account`（sk-hub.jp のものを写す） | `{ name, email, photo, letter, color, … }` |
 
 `data` の中身（くわしくは各アプリのファイルのいちばん上）:
 
-- Doc: `{ html, page: { size, orient, margin, cols, vert, header, footer, num }, comments: [{ id, text, author, ts }] }`
-- Sheet: `{ v: 2, cur, sheets: [{ name, cells: { "A1": "…" }, style, cw, rh, merges, freeze, head, total, filter, cf, charts, grid }] }`（0.1 の `{ cells, fmt, head, total }` は `upgrade` で直す）
-- Slide: `{ slides: [{ layout, title, sub, items, items2, notes, bg, trans, objs: [{ id, type, x, y, w, h, rot, … }] }], theme, ratio }`
+- Doc: `{ html, page: { size, orient, margin, mx, my, cols, vert, header, footer, num, base }, comments: [{ id, text, author, ts }], styles: [{ id, name, base, css }] }`（`styles` は自作のスタイル。段落は `data-cst="ID"` で使う。`mx`・`my` は余白の px で、Word から読んだときの細かい値。`base` は本文の既定で `{ fs: pt, lh: CSS の行間, ff: フォント }`）
+- Sheet: `{ v: 2, cur, sheets: [{ name, cells: { "A1": "…" }, style, cw, rh, merges, freeze, head, total, filter, cf, dv, notes, charts, grid }] }`（`dv` は入力規則 `[{ ref, type, op, f1, f2, allowBlank, promptTitle, prompt, errTitle, err, style }]`、`notes` はコメント `{ "A1": { text, author, ts } }`。0.1 の `{ cells, fmt, head, total }` は `upgrade` で直す）
+- Slide: `{ slides: [{ layout, title, sub, items, items2, notes, bg, trans, objs: [{ id, type, x, y, w, h, rot, … }] }], theme, ratio }`（`type` が `group` のものは `children: [同じ形の図形]` を持ち、子の `x`・`y`・`w`・`h` はグループの中での %。図形の線の太さは `lw`（pt））
 
 ### ファイルの場所
 
@@ -141,10 +186,12 @@ python -m http.server 8765
 | `office/doc/`・`sheet/`・`slide/index.html` | 各アプリのページ（中身はほぼ同じ。`data-app`・アプリ名・読み込むファイルだけちがう） |
 | `office/shared/office.js` | 画面の枠（スタート画面・リボン・エディタの枠・元に戻す・検索・印刷・アカウント・設定・PWA） |
 | `office/shared/doc.js`・`sheet.js`・`slide.js` | 各アプリの中身（リボン・編集・読み込み・書き出し・印刷） |
+| `office/shared/vendor/opentype.min.js` | 埋め込みフォントの解析（opentype.js 2.0.0・MIT。ライセンスは `opentype.LICENSE`） |
 | `office/shared/formula.js` | 数式（字句・構文・計算・関数・参照のずらし・表示形式） |
 | `office/shared/chart.js` | グラフ（SVG。Sheet・Doc・Slide で同じものを使う） |
 | `office/shared/zip.js` | ZIP の読み書き（Office のファイル用） |
-| `office/shared/store.js` | ファイルの保存（フォルダ・ブラウザの中・ダブルクリックで開いたファイル・版の履歴） |
+| `office/shared/store.js` | ファイルの保存（フォルダ・ブラウザの中・Google ドライブ・ダブルクリックで開いたファイル・版の履歴） |
+| `office/shared/drive.js` | Google ドライブ（ログイン・Drive API。store.js より先に読み込む） |
 | `office/shared/templates.js` | テンプレート |
 | `office/shared/office.css` | 見た目（色・スタート画面・リボン・メニュー・各エディタ・スライド ショー・タイトルバー・印刷） |
 | `office/manifest.json`・`office/sw.js` | PWA（インストール・オフライン・ファイルの関連付け） |
@@ -153,6 +200,8 @@ python -m http.server 8765
 | `_workers/office/` | office.sk-hub.jp の Worker |
 | `_build/pages/office.html`・`products/office/` | 紹介ページ（build で作る） |
 | `_mockups/office/` | 最初の試作（配信しない） |
+| `_tests/office/` | テスト（`run.py`・`run.js`・`fixtures.js`・`check.py`。配信しない） |
+| `_tests/office/vendor/` | テストだけの第三者エンジン（`docx`・`docx-preview`・`JSZip` とライセンス。配信しない） |
 
 ---
 
@@ -172,16 +221,18 @@ python -m http.server 8765
 - [x] 印刷と PDF の書き出し（実際に印刷して見た目を確かめる）
 - [x] 版の履歴
 - [x] キーボードショートカットの一覧
+- [x] 書き出し・読み込みの自動テスト（`_tests/office/`）。見つけたずれを直した（.docx の書式の要素の順番・`rFonts` が 2 回・空の段落、.xlsx の `_xlfn.`・`#CIRC!`、.pptx のノート）
 - [ ] 書き出したファイルを Microsoft Office・LibreOffice で開いて確かめ、ずれを直す
 
 ### 段階 2: Doc（LibreOffice Writer 相当）
 
 - [x] フォント・大きさ・色・蛍光ペン、行の高さ
-- [ ] 段落の前後の間隔、スタイルを自分で作る・変える
+- [x] 段落の前後の間隔、スタイルを自分で作る・変える
 - [x] 用紙のサイズ・向き・余白、ページの区切りの表示
 - [x] ヘッダー・フッター・ページ番号、段組み
 - [x] 表（結合・塗りつぶし）、画像の配置と文字の回り込み
-- [ ] 表の罫線・列の幅、図形
+- [x] 表の罫線・列の幅
+- [ ] 図形
 - [x] 脚注・目次の自動作成、コメント、スペルチェック
 - [ ] 文末脚注、数式（KaTeX）、変更の記録
 - [x] 縦書き
@@ -193,17 +244,20 @@ python -m http.server 8765
 - [x] よく使う関数、オートフィル、相対参照と絶対参照、ほかのシートの参照
 - [x] 複数のシート、行と列の固定
 - [x] 並べ替え・フィルター、条件付き書式
-- [ ] 入力規則（リストから選ぶ）
+- [x] 入力規則（リストから選ぶ）
+- [x] セルのコメント
 - [x] グラフ（自作の `chart.js`）
-- [ ] ピボットテーブル、10 万行でも重くならない表示（見えている行だけ作る）
+- [x] 10 万行でも重くならない表示（見えている行だけ作る）
+- [ ] ピボットテーブル、変えたセルにかかわるところだけ計算しなおす（いまはブック全体）
 - [x] `.xlsx`・`.csv` の読み込み・書き出し
-- [ ] グラフ・条件付き書式の `.xlsx` への書き出し
+- [x] 条件付き書式の `.xlsx` への書き出し・読み込み
+- [ ] グラフの `.xlsx` への書き出し
 
 ### 段階 4: Slide（LibreOffice Impress 相当）
 
 - [x] テキストボックス・図形・画像を自由に置く・大きさを変える・回す
 - [x] 整列・重なり順
-- [ ] グループ化
+- [x] グループ化、図形の線の太さ
 - [x] テーマ（色のセット）、背景
 - [ ] スライドマスター、フォントのセット
 - [x] グラフ（Sheet と共通の `chart.js`）
@@ -215,15 +269,28 @@ python -m http.server 8765
 ### 段階 5: SK らしさ
 
 - [x] SK Hub Systems アカウントでログイン（名前とアイコンを出すだけ）
-- [ ] インターネット上への保存・同期（下の「決めていないこと」）
-- [ ] みんなで同時に編集（Yjs など）
+- [x] 保存先を切りかえられるようにする（この PC・Google ドライブ。`store.js` が ID で行き先を決める）
+- [ ] Google ドライブへの保存を本物で試す（Google Cloud の設定のあと）。オフラインのときに、あとで送る
+- [ ] 共有（SK Hub Systems アカウントどうしだけ。相手のアカウントにつないだ Google アカウントに、ドライブの共有をかける）・「共有アイテム」
+- [ ] みんなで同時に編集（Yjs。中継は Cloudflare Durable Objects で、中身は残さない。ログインは Worker で Firebase のトークンを確かめる）。Sheet・Slide から
+- [ ] Doc の作り直し（同時に編集できる文書のしくみ）→ Doc の同時編集
+- [ ] コメントの @メンション・通知・提案モード
 - [ ] SK Study・SK's Toolbox とのつながり（例: Sheet の名簿をクラスに配る）
 - [ ] `.odt`・`.ods`・`.odp`（LibreOffice の形式）の読み書き
 - [ ] Microsoft Store への公開（PWABuilder）。必要なら Tauri で Windows・Mac のインストーラー
 
+### 決めたこと（2026-10-22）
+
+目標は **Google Workspace に近づける**（クラウドに保存・共有・同時に編集）。
+
+- **保存先は、使う人の Google ドライブ**（`drive.file`）。クラウドに保存・共有できるのは、SK Hub Systems アカウントに Google をつないだ人だけ。ほかの人は、いままでどおり PC のフォルダ。あとでほかの保存先も足せるよう、保存先は切りかえられる形にした
+- **同時に編集するしくみは Yjs**（MIT ライセンス）。「外の部品は使わない」の例外にする（CRDT を自作すると、それだけで数か月かかり、まちがいも出やすいため）
+- **共有は SK Hub Systems アカウントどうしだけ**（リンクを知っていればだれでも、にはしない。学校・子どもの利用を考えて）
+- 作る順番: 保存先の切りかえと Google ドライブ → 共有 → Sheet・Slide の同時編集 → Doc の作り直しと同時編集 → コメント・通知
+
 ### 決めていないこと
 
-- **インターネット上への保存（オンライン保存）の置き場所**。いまは PC のフォルダだけ。候補:
+- （決めた）~~インターネット上への保存（オンライン保存）の置き場所~~ → 上の「決めたこと」。そのときの候補:
 
   | 置き場所 | よいところ | 気になるところ |
   |---|---|---|
