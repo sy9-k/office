@@ -10,8 +10,8 @@ const SHELL = ["", "doc/", "sheet/", "slide/", "about/", "manifest.json", "doc/m
   "shared/office.css", "shared/office.js", "shared/store.js", "shared/drive.js", "shared/templates.js",
   "shared/doc.js", "shared/sheet.js", "shared/slide.js", "shared/formula.js", "shared/chart.js", "shared/zip.js", "shared/vendor/opentype.min.js",
   "icons/icon.svg", "icons/icon-192.png", "icons/doc-192.png", "icons/sheet-192.png", "icons/slide-192.png"].map((p) => BASE + p)
-  .concat(["/toolbox/shared/m3.css", "/toolbox/shared/m3.js", "/assets/i18n.js", "/assets/fonts.js", "/assets/coming-soon.js", "/assets/maintenance.js"]);
-const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com"];
+  .concat(["https://sk-hub.jp/toolbox/shared/m3.css", "https://sk-hub.jp/toolbox/shared/m3.js", "https://sk-hub.jp/assets/i18n.js", "https://sk-hub.jp/assets/fonts.js", "https://sk-hub.jp/assets/coming-soon.js", "https://sk-hub.jp/assets/maintenance.js"]);
+const FONT_HOSTS = ["fonts.googleapis.com", "fonts.gstatic.com", "sk-hub.jp"]; // sk-hub.jp は共通の部品（m3・i18n・fonts…）。取っておいたものを先に使う
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(VERSION).then((cache) => Promise.allSettled(SHELL.map((u) => cache.add(u)))).then(() => self.skipWaiting()));
