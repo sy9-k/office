@@ -19,13 +19,13 @@
 <link rel="stylesheet" href="../shared/office.css">
 <!-- ライト・ダークと動きを減らすは、SK Hub Office のオプション（sk_office_settings）。「端末に合わせる」のときは、同じ場所に SK's Toolbox の設定（sk_toolbox）があればそろえる -->
 <script>(function(){var d=document.documentElement;try{var o=JSON.parse(localStorage.getItem("sk_office_settings")||"{}"),s=JSON.parse(localStorage.getItem("sk_toolbox")||"{}"),th=o.theme==="light"||o.theme==="dark"?o.theme:s.theme;if(th==="light"||th==="dark")d.setAttribute("data-theme",th);if(o.motion==="reduce"||s.motion==="reduce")d.setAttribute("data-motion","reduce");}catch(e){}})();</script>
-<!-- PWA（アプリとして入れる・オフライン）。manifest と sw.js は Office のいちばん上 -->
-<link rel="manifest" href="../manifest.json">
+<!-- PWA（アプリとして入れる・オフライン）。manifest はアプリごと（このフォルダ）、sw.js は Office のいちばん上 -->
+<link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/svg+xml" href="../icons/icon.svg">
-<link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+<link rel="apple-touch-icon" href="../icons/sheet-apple.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Office">
+<meta name="apple-mobile-web-app-title" content="Sheet">
 </head>
 <body>
   <!-- 起動画面 -->

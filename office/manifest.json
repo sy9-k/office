@@ -23,10 +23,5 @@
     { "name": "Doc", "short_name": "Doc", "description": "文書を書く", "url": "./doc/", "icons": [{ "src": "icons/doc-96.png", "sizes": "96x96", "type": "image/png" }] },
     { "name": "Sheet", "short_name": "Sheet", "description": "表で計算する", "url": "./sheet/", "icons": [{ "src": "icons/sheet-96.png", "sizes": "96x96", "type": "image/png" }] },
     { "name": "Slide", "short_name": "Slide", "description": "発表をつくる", "url": "./slide/", "icons": [{ "src": "icons/slide-96.png", "sizes": "96x96", "type": "image/png" }] }
-  ],
-  "file_handlers": [
-    { "action": "./doc/", "accept": { "application/x-sk-hub-office-doc": [".skdoc"] }, "icons": [{ "src": "icons/doc-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" },
-    { "action": "./sheet/", "accept": { "application/x-sk-hub-office-sheet": [".sksheet"] }, "icons": [{ "src": "icons/sheet-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" },
-    { "action": "./slide/", "accept": { "application/x-sk-hub-office-slide": [".skslide"] }, "icons": [{ "src": "icons/slide-96.png", "sizes": "96x96", "type": "image/png" }], "launch_type": "single-client" }
   ]
 }

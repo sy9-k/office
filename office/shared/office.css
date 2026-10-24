@@ -425,6 +425,17 @@ h1, h2, h3, p { margin: 0; }
 .app-tile small { font-size: 13px; color: var(--md-on-surface-variant); }
 .app-tile--doc { --c: var(--doc-c); } .app-tile--sheet { --c: var(--sheet-c); } .app-tile--slide { --c: var(--slide-c); }
 
+/* 「アプリ」（SK Hub のアプリを全部出すページ） */
+.skapps__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.skapp { display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: 16px; text-decoration: none; color: var(--md-on-surface); background: var(--md-surface-container-low); box-shadow: inset 0 0 0 1px var(--md-outline-variant); min-width: 0; }
+.skapp[aria-current] { box-shadow: inset 0 0 0 2px var(--md-primary); }
+.skapp__ico { position: relative; width: 48px; height: 48px; border-radius: 14px; overflow: hidden; display: grid; place-items: center; flex: none; font-weight: 700; color: var(--md-on-primary-container); background: var(--md-primary-container); }
+.skapp__ico img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--md-surface); }
+.skapp__ico[data-app] { color: #fff; }
+.skapp__ico[data-app="doc"] { background: var(--doc-c); } .skapp__ico[data-app="sheet"] { background: var(--sheet-c); } .skapp__ico[data-app="slide"] { background: var(--slide-c); }
+.skapp strong { display: block; font-size: 16px; font-weight: 700; line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skapp small { display: block; font-size: 12px; color: var(--md-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ================================================================
    エディタ（タイトルバー・リボン・中身・ステータスバー）
    ================================================================ */
@@ -557,14 +568,14 @@ h1, h2, h3, p { margin: 0; }
 .doc-page[data-rule="bar"] h2 { padding-left: 12px; border-left: 6px solid var(--dd-ac); }
 .doc-page p { margin: 0 0 12px; }
 .doc-page ul, .doc-page ol { margin: 0 0 12px; padding-left: 1.5em; }
-.doc-page blockquote { margin: 0 0 12px; padding-left: 16px; border-left: 3px solid #c3c6d7; color: #434655; }
-.doc-page a { color: #1d4ed8; }
+.doc-page blockquote { margin: 0 0 12px; padding-left: 16px; border-left: 3px solid var(--dd-ac, #c3c6d7); color: #434655; }
+.doc-page a { color: var(--dd-ac, #1d4ed8); }
 .doc-page hr { border: 0; border-top: 1px solid #c3c6d7; margin: 20px 0; }
 .doc-page table { width: 100%; border-collapse: collapse; margin: 0 0 16px; font-size: 15px; }
 .doc-page th, .doc-page td { border: 1px solid #d5d6dc; padding: 8px 12px; text-align: left; vertical-align: top; min-width: 3em; }
 /* 罫線を自分で設定した表（data-bd）。罫線はセルの inline style で書く */
 .doc-page table[data-bd] th, .doc-page table[data-bd] td { border: 0; }
-.doc-page th { background: #eef0f6; font-weight: 700; width: 9em; }
+.doc-page th { background: var(--dd-th, #eef0f6); font-weight: 700; width: 9em; }
 .doc-page .meta { color: #5a5f6b; font-size: 14px; }
 .doc-page .right { text-align: right; }
 .doc-page img { max-width: 100%; height: auto; border-radius: 4px; margin: 8px 0; }
@@ -770,6 +781,12 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
 .sl-obj--group > .sl-obj { pointer-events: none; }
 .sl-obj > img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
 .sl-obj--chart svg { display: block; width: 100%; height: 100%; }
+/* 表（スライドの中） */
+.sl-tbl { width: 100%; height: 100%; border-collapse: collapse; table-layout: fixed; color: var(--sl-ink); }
+.sl-tbl td, .sl-tbl th { border: 1px solid color-mix(in srgb, var(--sl-ink) 28%, transparent); padding: .35em .6em; text-align: left; vertical-align: middle; line-height: 1.35; overflow-wrap: anywhere; outline: none; }
+.sl-tbl th { background: var(--sl-accent); color: var(--sl-bg); font-weight: 700; }
+.sl-tbl [contenteditable="true"] { cursor: text; }
+.sl-tbl [contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px var(--md-primary); }
 .sl-shape { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .sl-text { position: relative; display: flex; flex-direction: column; width: 100%; height: 100%; box-sizing: border-box; padding: .6cqw 1cqw; }
 .sl-tx { line-height: 1.4; outline: none; overflow-wrap: anywhere; min-height: 1.4em; }
@@ -799,12 +816,8 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
 /* スライドの中身（幅に合わせて縮む。プレビュー・スライド ショーも同じ） */
 /* テーマの色（slide.js の THEMES と同じ値）。スライドの背景を変えたときは、--sl-bg だけを style で上書きする */
 .sl { --sl-bg: #ffffff; --sl-ink: #261813; --sl-sub: #6b4a3d; --sl-accent: #ea580c; --sl-soft: #fff1ec; --sl-blob: #ffe2d4; --sl-sec: #cc4900; --sl-sec-ink: #fffbff;
-  position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--sl-bg); color: var(--sl-ink); font-family: var(--md-font); }
-.sl[data-theme="ocean"] { --sl-bg: #ffffff; --sl-ink: #0f1d33; --sl-sub: #3b4a63; --sl-accent: #2563eb; --sl-soft: #eaf1ff; --sl-blob: #dbe7ff; --sl-sec: #1d4ed8; --sl-sec-ink: #ffffff; }
-.sl[data-theme="matcha"] { --sl-bg: #fbfdf8; --sl-ink: #16241a; --sl-sub: #3e5443; --sl-accent: #16a34a; --sl-soft: #e9f6ea; --sl-blob: #d6f0d9; --sl-sec: #15803d; --sl-sec-ink: #ffffff; }
-.sl[data-theme="sakura"] { --sl-bg: #fffafb; --sl-ink: #2f1820; --sl-sub: #6b4552; --sl-accent: #db2777; --sl-soft: #fdeef4; --sl-blob: #fbd5e5; --sl-sec: #be185d; --sl-sec-ink: #ffffff; }
-.sl[data-theme="mono"] { --sl-bg: #ffffff; --sl-ink: #111111; --sl-sub: #555555; --sl-accent: #111111; --sl-soft: #f2f2f2; --sl-blob: #e8e8e8; --sl-sec: #111111; --sl-sec-ink: #ffffff; }
-.sl[data-theme="night"] { --sl-bg: #14161f; --sl-ink: #f1f2f6; --sl-sub: #b6bacb; --sl-accent: #f59e0b; --sl-soft: #232634; --sl-blob: #2a2e3e; --sl-sec: #f59e0b; --sl-sec-ink: #14161f; }
+  position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--sl-bg); color: var(--sl-ink); font-family: var(--sl-font, var(--md-font)); }
+/* ほかのテーマの色は、slide.js が THEMES から <style id="sl-themes"> に書く */
 .th--slide { aspect-ratio: var(--sl-ratio, 16 / 9); }
 .th--slide .sl, .deck-slide .sl, .present__slide .sl, .present__nextslide .sl { aspect-ratio: var(--sl-ratio, 16 / 9); }
 .sl-blob { position: absolute; right: -8cqw; top: -12cqw; width: 40cqw; height: 40cqw; border-radius: 50%; background: var(--sl-blob); box-shadow: 0 0 0 4cqw color-mix(in srgb, var(--sl-accent) 12%, transparent); }
@@ -992,6 +1005,12 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
 .menu__sub { font-size: 12px; color: var(--md-on-surface-variant); white-space: nowrap; }
 .menu__sep { height: 1px; margin: 6px 0; background: var(--md-outline-variant); }
 .menu__head { padding: 8px 16px 4px; font-size: 12px; font-weight: 500; color: var(--md-primary); }
+/* アイコンを押したときのアカウントのカード */
+.menu--account { min-width: 280px; padding: 8px 0; }
+.menu--account a.menu__item { text-decoration: none; }
+.acct-pop__user { display: flex; align-items: center; gap: 14px; padding: 8px 16px 4px; min-width: 0; }
+.acct-avatar--lg { width: 56px; height: 56px; font-size: 24px; }
+.acct-avatar--lg .msr { font-size: 32px; }
 .menu__swatch { width: 20px; height: 20px; flex: none; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); }
 .menu--palette { min-width: 0; padding: 8px; }
 .menu--palette .menu__item { padding: 0 8px; border-radius: 8px; }
