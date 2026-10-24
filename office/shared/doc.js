@@ -1,7 +1,8 @@
 // SK Hub Office の Doc（文書）。window.OfficeApps.doc に登録し、/office/shared/office.js が呼ぶ（O は office.js が渡す道具）
 //   ファイルの中身（data）: { html: 本文, page: 用紙, comments: [コメント] }
 //     page: { size: "a4|letter|b5|a3", orient: "portrait|landscape", margin: "normal|narrow|wide", mx, my: 左右・上下の余白（px。あれば margin より優先）, cols: 1〜3, vert: 縦書き, header, footer, num: ページ番号,
-//             base: { fs: 本文の文字の大きさ（pt）, lh: 行間, ff: フォント }（.docx の docDefaults。無ければ画面の標準） }
+//             base: { fs: 本文の文字の大きさ（pt）, lh: 行間, ff: フォント }（.docx の docDefaults。無ければ画面の標準）,
+//             design: DESIGNS のキー（見出しの色・フォント・h2 の飾りなど。無ければ標準） }
 //     comments: [{ id, text, author, ts }]（本文の中では <span class="cmt" data-cmt="id"> で印を付ける）
 //   本文は contenteditable の <article id="page">。書式は document.execCommand（styleWithCSS で、色・大きさは span の style になる）
 //   画面: ナビゲーション（見出しの一覧）・用紙（ヘッダー・本文・フッター）・コメント。用紙の背景に、印刷したときのページの区切りの線を引く
@@ -18,6 +19,24 @@
     var SIZES = { a4: { w: 794, h: 1123, label: "A4", tw: 11906, th: 16838, css: "A4" }, b5: { w: 688, h: 972, label: "B5", tw: 10318, th: 14570, css: "182mm 257mm" },
       a3: { w: 1123, h: 1587, label: "A3", tw: 16838, th: 23811, css: "A3" }, letter: { w: 816, h: 1056, label: "Letter", tw: 12240, th: 15840, css: "letter" } };
     var MARGINS = { normal: { x: 96, y: 96, label: t("標準"), mm: "25.4mm" }, narrow: { x: 48, y: 48, label: t("狭い"), mm: "12.7mm" }, wide: { x: 144, y: 96, label: t("広い"), mm: "25.4mm 38.1mm" } };
+    // ---------- デザイン（見出しの色・フォント・見出しの飾り・表の見出しの色）。page.design に ID を入れる。無いときは「標準」 ----------
+    //   h1・h2・h3: 見出しの色（h1 は表題）。ac: 引用の線・リンクの色。th: 表の見出しのセルの色。rule: h2 の飾り（"rule" 下線・"bar" 左の線）。h1c: 表題を中央に。
+    //   hf・bf: 画面の見出し・本文のフォント。hface・face: .docx に書くフォント名
+    var SERIF = '"Noto Serif JP","Yu Mincho","Hiragino Mincho ProN",serif';
+    var DESIGNS = {
+      business: { label: t("ビジネス"), group: "biz", h1: "#0b1f3a", h2: "#0b1f3a", h3: "#4a5a73", ac: "#b8862b", th: "#f1ece0", rule: "rule" },
+      modern: { label: t("モダン"), group: "biz", h1: "#111827", h2: "#2563eb", h3: "#374151", ac: "#2563eb", th: "#eff6ff", rule: "bar" },
+      tech: { label: t("テック"), group: "biz", h1: "#0f172a", h2: "#0d9488", h3: "#334155", ac: "#0d9488", th: "#e6f7f5", rule: "rule" },
+      report: { label: t("レポート"), group: "biz", h1: "#1c1c1c", h2: "#1c1c1c", h3: "#444444", ac: "#777777", th: "#f0f0f0", rule: "rule", h1c: 1, hf: SERIF, bf: SERIF, hface: "Yu Mincho", face: "Yu Mincho" },
+      mono: { label: t("モノクロ"), group: "biz", h1: "#000000", h2: "#000000", h3: "#444444", ac: "#000000", th: "#eeeeee", rule: "rule" },
+      warm: { label: t("あたたかい"), group: "color", h1: "#7c2d12", h2: "#c2410c", h3: "#9a3412", ac: "#c2410c", th: "#fff1e6", rule: "bar" },
+      nature: { label: t("自然"), group: "color", h1: "#14532d", h2: "#15803d", h3: "#166534", ac: "#15803d", th: "#e8f5ec", rule: "rule" },
+      sakura: { label: t("さくら"), group: "color", h1: "#831843", h2: "#be185d", h3: "#9d174d", ac: "#be185d", th: "#fdeef4", rule: "rule" },
+      lavender: { label: t("ラベンダー"), group: "color", h1: "#3b2a73", h2: "#6d4fc8", h3: "#5b3fb0", ac: "#6d4fc8", th: "#f0eaff", rule: "bar" },
+      washi: { label: t("和風"), group: "classic", h1: "#2a2118", h2: "#b3261e", h3: "#6a5a47", ac: "#b3261e", th: "#efe6d3", rule: "bar", hf: SERIF, bf: SERIF, hface: "Yu Mincho", face: "Yu Mincho" },
+      classic: { label: t("クラシック"), group: "classic", h1: "#3a2c1d", h2: "#6f451f", h3: "#74624b", ac: "#6f451f", th: "#ece0c9", rule: "rule", h1c: 1, hf: SERIF, bf: SERIF, hface: "Yu Mincho", face: "Yu Mincho" }
+    };
+    var DESIGN_GROUPS = [["", t("SK のデザイン")], ["biz", t("ビジネス")], ["color", t("いろいろな色")], ["classic", t("和・クラシック")]];
     // カスタムスタイル（data.styles）。元のスタイル → .docx のスタイル ID
     var CST_BASE = { p: "Normal", h1: "Title", h2: "Heading1", h3: "Heading2", blockquote: "Quote" };
     var CST_TAG = { p: "p", h1: "h1", h2: "h2", h3: "h3", blockquote: "blockquote" };
@@ -27,6 +46,7 @@
       if (!SIZES[p.size]) p.size = "a4";
       if (p.orient !== "landscape") p.orient = "portrait";
       if (!MARGINS[p.margin]) p.margin = "normal";
+      if (!DESIGNS[p.design]) delete p.design;
       ["mx", "my"].forEach(function (k) {
         if (p[k] !== undefined && p[k] !== null && isFinite(+p[k]) && +p[k] >= 0) p[k] = +p[k];
         else delete p[k];
@@ -245,6 +265,12 @@
       page.style.fontSize = b.fs ? b.fs + "pt" : "";
       page.style.lineHeight = b.lh ? String(b.lh) : "";
       page.style.fontFamily = b.ff ? O.fontCss(b.ff) : "";
+      // デザイン（見出しの色・フォントなどを CSS の変数にして、用紙に付ける。印刷でも同じ）
+      var dz = DESIGNS[p.design] || {};
+      [["--dd-h1", dz.h1], ["--dd-h2", dz.h2], ["--dd-h3", dz.h3], ["--dd-ac", dz.ac], ["--dd-th", dz.th], ["--dd-hf", dz.hf], ["--dd-bf", dz.bf], ["--dd-h1a", dz.h1c ? "center" : ""]].forEach(function (x) {
+        if (x[1]) paper.style.setProperty(x[0], x[1]); else paper.style.removeProperty(x[0]);
+      });
+      if (dz.rule) paper.setAttribute("data-rule", dz.rule); else paper.removeAttribute("data-rule");
       paper.classList.toggle("is-vert", !!p.vert);
       el("doc-scroll").classList.toggle("is-vert", !!p.vert);
       page.style.columnCount = p.cols > 1 ? p.cols : "";
@@ -1059,6 +1085,15 @@
       if (!page) return;
       var ro = readOnly && !/^(nav|comments|count|toc:update)$/.test(cmd);
       if (ro) { O.notify(t("閲覧モードでは書きかえられません")); return; }
+      if (cmd === "designMenu") {
+        var dp = pageOf(data), items = [{ head: DESIGN_GROUPS[0][1] }, { value: "", label: t("標準"), color: "#1d4ed8", checked: !dp.design }];
+        DESIGN_GROUPS.slice(1).forEach(function (g) {
+          items.push({ head: g[1] });
+          Object.keys(DESIGNS).filter(function (k) { return DESIGNS[k].group === g[0]; }).forEach(function (k) { items.push({ value: k, label: DESIGNS[k].label, color: DESIGNS[k].h2, checked: dp.design === k }); });
+        });
+        return O.menu(at, items).then(function (v) { if (v !== null && v !== undefined) command("design:" + v); });
+      }
+      if (cmd.indexOf("design:") === 0) { var dq = pageOf(data), id = cmd.slice(7); if (id) dq.design = id; else delete dq.design; layout(); O.changed(); O.sync(); return; }
       if (cmd.indexOf("fmt:") === 0) return exec("formatBlock", cmd.slice(4));
       if (cmd.indexOf("cst:") === 0) { var st = cstById(cmd.slice(4)); return st ? cstApply(st) : null; }
       if (cmd.indexOf("img") === 0 || cmd.indexOf("wrap:") === 0) return imgCmd(cmd, at);
@@ -1193,6 +1228,10 @@
         { label: t("ヘッダーとフッター"), items: [{ stack: [{ icon: "vertical_align_top", label: t("ヘッダー"), cmd: "header" }, { icon: "vertical_align_bottom", label: t("フッター"), cmd: "footer" }, { icon: "tag", label: t("ページ番号"), cmd: "pageNum", toggle: "pageNum" }] }] },
         { label: t("テキスト"), items: [{ stack: [{ icon: "horizontal_rule", label: t("横線"), cmd: "hr" }, { icon: "today", label: t("日付"), cmd: "date" }, { icon: "emoji_symbols", label: t("記号"), cmd: "symbol", drop: 1 }] }] }
       ] },
+      { tab: t("デザイン"), groups: [
+        { label: t("ドキュメントのデザイン"), items: [{ big: 1, icon: "palette", label: t("デザイン"), cmd: "designMenu", drop: 1 }, { big: 1, icon: "format_paint", label: t("標準"), cmd: "design:", toggle: "design:" }]
+          .concat(["business", "modern", "report", "warm", "nature", "washi"].map(function (k) { return { big: 1, icon: "palette", label: DESIGNS[k].label, cmd: "design:" + k, toggle: "design:" + k }; })) }
+      ] },
       { tab: t("レイアウト"), groups: [
         { label: t("ページ設定"), items: [{ big: 1, icon: "margin", label: t("余白"), cmd: "margin", drop: 1 }, { big: 1, icon: "crop_rotate", label: t("印刷の向き"), cmd: "orient", drop: 1 },
           { big: 1, icon: "description", label: t("サイズ"), cmd: "size", drop: 1 }, { big: 1, icon: "view_column", label: t("段組み"), cmd: "cols", drop: 1 }, { big: 1, icon: "text_rotate_vertical", label: t("縦書き"), cmd: "vert", toggle: "vert" }] },
@@ -1233,6 +1272,8 @@
     function state() {
       if (!page) return {};
       var s = { cmts: showCmts, nav: showNav, spell: page.spellcheck, vert: !!pageOf(data).vert, pageNum: !!pageOf(data).num, painter: !!painter };
+      s["design:"] = !pageOf(data).design;
+      Object.keys(DESIGNS).forEach(function (k) { s["design:" + k] = pageOf(data).design === k; });
       var a = anchorEl();
       ["bold", "italic", "underline", "strikeThrough", "subscript", "superscript", "insertUnorderedList", "insertOrderedList", "justifyLeft", "justifyCenter", "justifyRight", "justifyFull"].forEach(function (c) {
         try { s[c] = !!a && document.queryCommandState(c); } catch (e) { s[c] = false; }
@@ -1546,9 +1587,14 @@
         };
         files["word/numbering.xml"] = head + "<w:numbering " + NS + '><w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="hybridMultilevel"/>' + lvls("bullet") + '</w:abstractNum><w:abstractNum w:abstractNumId="1"><w:multiLevelType w:val="hybridMultilevel"/>' + lvls("decimal") + "</w:abstractNum>" +
           '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' + numDefs.join("") + "</w:numbering>";
-        var bp = p.base || {}, bff = bp.ff || "游ゴシック", bsz = Math.round((bp.fs || 12) * 2), blh = Math.round((bp.lh || 1.85) * 240 / baseSingle);
+        var dz = DESIGNS[p.design] || {}, bp = p.base || {}, bff = bp.ff || dz.face || "游ゴシック", bsz = Math.round((bp.fs || 12) * 2), blh = Math.round((bp.lh || 1.85) * 240 / baseSingle);
         var font = '<w:rFonts w:ascii="' + X(bff) + '" w:eastAsia="' + X(bff) + '" w:hAnsi="' + X(bff) + '" w:cs="Times New Roman"/>';
         function sty(id, name, ppr, rpr, extra) { return '<w:style w:type="paragraph" w:styleId="' + id + '"><w:name w:val="' + name + '"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/>' + (extra || "") + (ppr ? "<w:pPr>" + ppr + "</w:pPr>" : "") + (rpr ? "<w:rPr>" + rpr + "</w:rPr>" : "") + "</w:style>"; }
+        // デザインの見出し（フォント・色・h2 の線）。rPr の中は、rFonts が先頭
+        var hRf = dz.hface ? '<w:rFonts w:ascii="' + X(dz.hface) + '" w:eastAsia="' + X(dz.hface) + '" w:hAnsi="' + X(dz.hface) + '"/>' : "";
+        function hClr(c) { return c ? '<w:color w:val="' + c.replace("#", "").toUpperCase() + '"/>' : ""; }
+        var acHex = dz.ac ? dz.ac.replace("#", "").toUpperCase() : "";
+        var h2Bd = dz.rule === "rule" ? '<w:pBdr><w:bottom w:val="single" w:sz="12" w:space="2" w:color="' + acHex + '"/></w:pBdr>' : dz.rule === "bar" ? '<w:pBdr><w:left w:val="single" w:sz="36" w:space="6" w:color="' + acHex + '"/></w:pBdr>' : "";
         var cstStyles = (data.styles || []).map(function (s) {
           var f = cstFields(s.css), ppr = "", rpr = "";
           if (f.b) rpr += "<w:b/>";
@@ -1563,11 +1609,11 @@
         }).join("");
         files["word/styles.xml"] = head + "<w:styles " + NS + "><w:docDefaults><w:rPrDefault><w:rPr>" + font + '<w:kern w:val="2"/><w:sz w:val="' + bsz + '"/><w:szCs w:val="' + bsz + '"/><w:lang w:val="en-US" w:eastAsia="ja-JP"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="180" w:line="' + blh + '" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
           '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/><w:pPr><w:jc w:val="both"/></w:pPr></w:style>' +
-          sty("Title", "Title", '<w:spacing w:after="240"/><w:jc w:val="left"/>', '<w:b/><w:sz w:val="44"/><w:szCs w:val="44"/>') +
-          sty("Heading1", "heading 1", '<w:keepNext/><w:spacing w:before="360" w:after="120"/><w:jc w:val="left"/><w:outlineLvl w:val="0"/>', '<w:b/><w:color w:val="1D4ED8"/><w:sz w:val="32"/><w:szCs w:val="32"/>') +
-          sty("Heading2", "heading 2", '<w:keepNext/><w:spacing w:before="240" w:after="80"/><w:jc w:val="left"/><w:outlineLvl w:val="1"/>', '<w:b/><w:sz w:val="26"/><w:szCs w:val="26"/>') +
-          sty("Heading3", "heading 3", '<w:keepNext/><w:spacing w:before="200" w:after="60"/><w:outlineLvl w:val="2"/>', "<w:b/>") +
-          sty("Quote", "Quote", '<w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="C3C6D7"/></w:pBdr><w:ind w:left="284"/>', '<w:color w:val="434655"/>') +
+          sty("Title", "Title", '<w:spacing w:after="240"/><w:jc w:val="' + (dz.h1c ? "center" : "left") + '"/>', hRf + '<w:b/>' + hClr(dz.h1) + '<w:sz w:val="44"/><w:szCs w:val="44"/>') +
+          sty("Heading1", "heading 1", '<w:keepNext/>' + h2Bd + '<w:spacing w:before="360" w:after="120"/><w:jc w:val="left"/><w:outlineLvl w:val="0"/>', hRf + '<w:b/>' + hClr(dz.h2 || "#1d4ed8") + '<w:sz w:val="32"/><w:szCs w:val="32"/>') +
+          sty("Heading2", "heading 2", '<w:keepNext/><w:spacing w:before="240" w:after="80"/><w:jc w:val="left"/><w:outlineLvl w:val="1"/>', hRf + '<w:b/>' + hClr(dz.h3) + '<w:sz w:val="26"/><w:szCs w:val="26"/>') +
+          sty("Heading3", "heading 3", '<w:keepNext/><w:spacing w:before="200" w:after="60"/><w:outlineLvl w:val="2"/>', hRf + "<w:b/>" + hClr(dz.h3)) +
+          sty("Quote", "Quote", '<w:pBdr><w:left w:val="single" w:sz="18" w:space="8" w:color="' + (dz.ac ? dz.ac.replace("#", "").toUpperCase() : "C3C6D7") + '"/></w:pBdr><w:ind w:left="284"/>', '<w:color w:val="434655"/>') +
           sty("ListParagraph", "List Paragraph", '<w:spacing w:after="40"/><w:ind w:left="840"/>') +
           sty("Code", "Code", '<w:shd w:val="clear" w:color="auto" w:fill="F1F3F7"/><w:spacing w:after="0"/>', '<w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="20"/>') +
           sty("FootnoteText", "footnote text", '<w:spacing w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="left"/>', '<w:sz w:val="18"/><w:szCs w:val="18"/>') +
@@ -1607,6 +1653,16 @@
       h.querySelectorAll(".is-sel").forEach(function (x) { x.classList.remove("is-sel"); });
       return h.innerHTML;
     }
+    // デザインの色・フォントを、書き出す HTML の CSS にする（画面は office.css の .doc-page と同じ見た目）
+    function designCss(p) {
+      var d = DESIGNS[p.design];
+      if (!d) return "";
+      var f = function (v) { return String(v).replace(/"/g, "'"); };
+      return (d.bf ? "body{font-family:" + f(d.bf) + "}" : "") +
+        "h1{color:" + d.h1 + (d.h1c ? ";text-align:center" : "") + (d.hf ? ";font-family:" + f(d.hf) : "") + "}h2{color:" + d.h2 + (d.hf ? ";font-family:" + f(d.hf) : "") +
+        (d.rule === "rule" ? ";padding-bottom:4px;border-bottom:2px solid " + d.ac : d.rule === "bar" ? ";padding-left:12px;border-left:6px solid " + d.ac : "") + "}h3{color:" + d.h3 + (d.hf ? ";font-family:" + f(d.hf) : "") + "}" +
+        "th{background:" + d.th + "}blockquote{border-left-color:" + d.ac + "}a{color:" + d.ac + "}";
+    }
     function htmlFile() {
       var name = O.file() ? O.file().name : "", p = pageOf(data), b = p.base || {};
       var baseCss = (b.fs ? "font-size:" + b.fs + "pt;" : "") + (b.lh ? "line-height:" + b.lh + ";" : "") + (b.ff ? "font-family:" + O.fontCss(b.ff).replace(/"/g, "'") + ";" : "");
@@ -1616,6 +1672,7 @@
         "blockquote{margin:0 0 12px;padding-left:16px;border-left:3px solid #c3c6d7;color:#434655}img{max-width:100%;height:auto}.wrap-l{float:left;margin:4px 16px 8px 0}.wrap-r{float:right;margin:4px 0 8px 16px}.wrap-c{display:block;margin:8px auto}" +
         "hr.pagebreak{border:0;break-after:page}.meta{color:#5a5f6b;font-size:14px}.right{text-align:right}.toc{padding:12px 16px;background:#f3f4f8;border-radius:8px}.toc a{color:inherit}.toc__item--h3{padding-left:1.5em}" +
         "table[data-bd] th,table[data-bd] td{border:0}" +
+        designCss(p) +
         cstList(data).filter(function (s) { return s.css; }).map(function (s) { return '[data-cst="' + s.id + '"]{' + s.css + "}"; }).join("") +
         (p.vert ? "body{writing-mode:vertical-rl;max-width:none;height:90vh}" : "") + "\n</style>\n</head>\n<body>\n" + cleanHtml() + "\n</body>\n</html>\n";
     }
@@ -1788,8 +1845,23 @@
             text: kids(c, "p").map(function (p) { return kids(p, "t").map(function (x) { return x.textContent; }).join(""); }).join("\n").trim() };
         });
         var HL = { yellow: "#fff59d", green: "#bbf7d0", cyan: "#a5f3fc", magenta: "#f5d0fe", blue: "#bfdbfe", red: "#fecaca", darkBlue: "#93c5fd", lightGray: "#e5e7eb", darkGray: "#9ca3af" };
+        // スタイル（w:style）を ID から引く。basedOn をたどって、自分→もとのスタイルの順に並べる
+        var styleById = {};
+        kids(styleDoc, "style").forEach(function (s) { styleById[attr(s, "styleId")] = s; });
+        function styleChain(id) {
+          var chain = [], seen = {};
+          while (id && !seen[id] && styleById[id]) { seen[id] = 1; chain.push(styleById[id]); id = attr(kid(styleById[id], "basedOn"), "val"); }
+          return chain;
+        }
         function runHtml(r) {
           var pr = kid(r, "rPr"), html = "";
+          // 文字スタイル（rStyle）の書式。run に直接書いた書式を先に見て、無ければスタイルを見る
+          var rchain = styleChain(attr(kid(pr, "rStyle"), "val"));
+          function rk(name) {
+            var e = kid(pr, name);
+            for (var i = 0; i < rchain.length && !e; i++) e = kid(kid(rchain[i], "rPr"), name);
+            return e;
+          }
           Array.prototype.forEach.call(r.childNodes, function (c) {
             if (c.nodeType !== 1) return;
             var ln = c.localName;
@@ -1829,16 +1901,16 @@
           });
           if (!html || !pr || /^<sup class="fn-ref"[^>]*>\d+<\/sup>$/.test(html)) return html;
           var css = "", open = "", close = "";
-          function on(name) { var e = kid(pr, name); return e && attr(e, "val") !== "0" && attr(e, "val") !== "false" && attr(e, "val") !== "none"; }
+          function on(name) { var e = rk(name); return e && attr(e, "val") !== "0" && attr(e, "val") !== "false" && attr(e, "val") !== "none"; }
           if (on("b")) { open += "<b>"; close = "</b>" + close; }
           if (on("i")) { open += "<i>"; close = "</i>" + close; }
           if (on("u")) { open += "<u>"; close = "</u>" + close; }
           if (on("strike") || on("dstrike")) { open += "<s>"; close = "</s>" + close; }
-          var va = attr(kid(pr, "vertAlign"), "val");
+          var va = attr(rk("vertAlign"), "val");
           if (va === "superscript") { open += "<sup>"; close = "</sup>" + close; }
           if (va === "subscript") { open += "<sub>"; close = "</sub>" + close; }
-          var col = hex(attr(kid(pr, "color"), "val")), sz = attr(kid(pr, "sz"), "val"), hl = HL[attr(kid(pr, "highlight"), "val")] || hex(attr(kid(pr, "shd"), "fill"));
-          var fonts = kid(pr, "rFonts"), ff = fonts ? attr(fonts, "eastAsia") || attr(fonts, "ascii") : null;
+          var col = hex(attr(rk("color"), "val")), sz = attr(rk("sz"), "val"), hl = HL[attr(rk("highlight"), "val")] || hex(attr(rk("shd"), "fill"));
+          var fonts = rk("rFonts"), ff = fonts ? attr(fonts, "eastAsia") || attr(fonts, "ascii") : null;
           if (col && col !== "#000000") css += "color:" + col + ";";
           if (sz && +sz !== Math.round(baseFs * 2)) css += "font-size:" + (+sz / 2) + "pt;";
           if (hl) css += "background-color:" + hl + ";";
@@ -1907,14 +1979,52 @@
           var anyW = widths.some(function (w) { return w > 0; });
           var fixed = anyW || attr(kid(pr, "tblLayout"), "type") === "fixed";
           // 表全体の罫線。セルに指定の無い辺は、この罫線（外側・内側）を使う
-          var tb = kid(pr, "tblBorders"), tbm = {};
+          // 表のスタイル（tblStyle）。表に直接書いた罫線・余白を先に見て、無ければスタイル（basedOn もたどる）を見る
+          var tchain = styleChain(attr(kid(pr, "tblStyle"), "val"));
+          function tprop(name) {
+            var e = kid(pr, name);
+            for (var i = 0; i < tchain.length && !e; i++) e = kid(kid(tchain[i], "tblPr"), name);
+            return e;
+          }
+          // 条件付きの書式（tblStylePr）。種類 → { fill, b, i, color }
+          var cond = {};
+          tchain.slice().reverse().forEach(function (s) {
+            kids(s, "tblStylePr").forEach(function (sp) {
+              var ty = attr(sp, "type"), rp = kid(sp, "rPr"), c = cond[ty] || (cond[ty] = {});
+              var f = hex(attr(kid(kid(sp, "tcPr"), "shd"), "fill"));
+              if (f) c.fill = f;
+              if (kid(rp, "b")) c.b = onEl(kid(rp, "b"));
+              if (kid(rp, "i")) c.i = onEl(kid(rp, "i"));
+              var cc = hex(attr(kid(rp, "color"), "val"));
+              if (cc) c.color = cc;
+            });
+          });
+          // tblLook（どの条件を使うか）。無いときは Word の標準（見出し行・最初の列・縞）
+          var look = kid(pr, "tblLook"), lookVal = look ? parseInt(attr(look, "val") || "0", 16) : 0x04A0;
+          function lookOn(name, bit) { var v = attr(look, name); return v ? v === "1" || v === "true" : !!(lookVal & bit); }
+          var useFirstRow = lookOn("firstRow", 0x20), useLastRow = lookOn("lastRow", 0x40), useFirstCol = lookOn("firstColumn", 0x80), useLastCol = lookOn("lastColumn", 0x100), useBand = !lookOn("noHBand", 0x200);
+          var bandSize = +(attr(tprop("tblStyleRowBandSize"), "val") || 1);
+          function styleOf(ri, ci, span, nrows) {
+            var out = {};
+            function put(c) { if (c) Object.keys(c).forEach(function (k) { out[k] = c[k]; }); }
+            if (useBand) {
+              var br = ri - (useFirstRow ? 1 : 0);
+              if (br >= 0) put(cond[Math.floor(br / bandSize) % 2 === 0 ? "band1Horz" : "band2Horz"]);
+            }
+            if (useFirstCol && ci === 0) put(cond.firstCol);
+            if (useLastCol && ci + span === lastCol) put(cond.lastCol);
+            if (useFirstRow && ri === 0) put(cond.firstRow);
+            if (useLastRow && ri === nrows - 1) put(cond.lastRow);
+            return out;
+          }
+          var tb = tprop("tblBorders"), tbm = {};
           ["top", "left", "bottom", "right", "insideH", "insideV"].forEach(function (s) { tbm[s] = kid(tb, s); });
           var bdNone = !!tb && ["top", "left", "bottom", "right", "insideH", "insideV"].every(function (s) { return tbm[s] && attr(tbm[s], "val") === "none"; });
           // このアプリが書き出した「ふつうの表」の罫線（0.5pt・BFC3CC）は、画面の標準の罫線と同じなので、セルには書かない
           var tbPlain = !!tb && !bdNone && ["top", "left", "bottom", "right", "insideH", "insideV"].every(function (s) {
             return tbm[s] && (attr(tbm[s], "val") || "single") === "single" && (+attr(tbm[s], "sz") || 0) === 4 && /^BFC3CC$/i.test(attr(tbm[s], "color") || "");
           });
-          var tcm = kid(pr, "tblCellMar");
+          var tcm = tprop("tblCellMar");
           // 行・セルを先に集める（罫線の種類を数えるため）
           var rows = kids(tbl, "tr").filter(function (tr) { return tr.parentNode === tbl; });
           var lastCol = 0;
@@ -1990,12 +2100,19 @@
             // w:tblHeader は「ページをまたぐときに見出しを繰り返す」だけで、val="0" は見出しではない
             var head = onEl(kid(kid(rows[ri], "trPr"), "tblHeader"));
             h += "<tr>";
+            var ci = 0;
             row.forEach(function (c) {
               var tc = c.tc, pr2 = c.pr2, vm = kid(pr2, "vMerge"), fill = hex(attr(kid(pr2, "shd"), "fill"));
+              var cs = tchain.length ? styleOf(ri, ci, c.span, info.length) : {};
+              ci += c.span;
               if (vm && attr(vm, "val") !== "restart") return;
               var cellTag = head || (ri === 0 && fill) ? "th" : "td", inner = [], st = c.css.slice();
               Array.prototype.forEach.call(tc.children, function (x) { if (x.localName === "p") { var y = paraBody(x); if (y) inner.push(y); } else if (x.localName === "tbl") inner.push(tableHtml2(x)); });
               if (fill && cellTag === "td" && fill !== "#ffffff") st.push("background-color:" + fill);
+              else if (!fill && cs.fill && cs.fill !== "#ffffff") st.push("background-color:" + cs.fill);
+              if (cs.b) st.push("font-weight:bold");
+              if (cs.i) st.push("font-style:italic");
+              if (cs.color) st.push("color:" + cs.color);
               h += "<" + cellTag + (c.span > 1 ? ' colspan="' + c.span + '"' : "") + (st.length ? ' style="' + st.join(";") + '"' : "") + ">" + (inner.join("<br>") || "<br>") + "</" + cellTag + ">";
             });
             h += "</tr>";

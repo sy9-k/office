@@ -1,7 +1,8 @@
 // SK Hub Office の Slide（プレゼンテーション）。window.OfficeApps.slide に登録し、/office/shared/office.js が呼ぶ（O は office.js が渡す道具）
-//   ファイルの中身（data）: { slides: [スライド], theme: "mikan|ocean|matcha|night|mono|sakura", ratio: "16:9|4:3" }
+//   ファイルの中身（data）: { slides: [スライド], theme: THEMES のキー（mikan・ocean・matcha・sakura・mono・night・corporate・washi など 21 種類）, ratio: "16:9|4:3" }
 //     スライド: { layout: "title|bullets|two|section|titleOnly|blank", title, sub, items, items2, notes, bg, trans: "none|fade|push|zoom", objs: [もの] }
-//     もの（自由に置けるもの）: { id, type: "text|shape|image|chart|group", x, y, w, h（スライドの幅・高さに対する %）, rot（度）, html（文字）,
+//     表: { type: "table", rows: [[セルの文字]], head: 1（0 で見出しの行なし）, fs }。列の幅・行の高さは等分
+//     もの（自由に置けるもの）: { id, type: "text|shape|image|chart|table|group", x, y, w, h（スライドの幅・高さに対する %）, rot（度）, html（文字）,
 //       shape: "rect|round|ellipse|triangle|diamond|arrow|star|callout|line", fill, line, lw（線の太さ pt）, color, fs（文字の大きさ pt。幅 960px のときの大きさ）, b, i, u, align: "l|c|r", va: "t|m|b",
 //       src（画像）, spec（グラフ）, anim: "fade|rise|zoom"（スライド ショーで順に出す） }
 //       グループ: { id, type: "group", x, y, w, h, rot, children: [もの] }。children の x・y・w・h は、グループの幅・高さに対する %
@@ -20,8 +21,35 @@
       matcha: { label: t("抹茶"), bg: "#fbfdf8", ink: "#16241a", sub: "#3e5443", accent: "#16a34a", soft: "#e9f6ea", blob: "#d6f0d9", sec: "#15803d", secInk: "#ffffff" },
       sakura: { label: t("さくら"), bg: "#fffafb", ink: "#2f1820", sub: "#6b4552", accent: "#db2777", soft: "#fdeef4", blob: "#fbd5e5", sec: "#be185d", secInk: "#ffffff" },
       mono: { label: t("モノクロ"), bg: "#ffffff", ink: "#111111", sub: "#555555", accent: "#111111", soft: "#f2f2f2", blob: "#e8e8e8", sec: "#111111", secInk: "#ffffff" },
-      night: { label: t("夜"), bg: "#14161f", ink: "#f1f2f6", sub: "#b6bacb", accent: "#f59e0b", soft: "#232634", blob: "#2a2e3e", sec: "#f59e0b", secInk: "#14161f" }
+      night: { label: t("夜"), bg: "#14161f", ink: "#f1f2f6", sub: "#b6bacb", accent: "#f59e0b", soft: "#232634", blob: "#2a2e3e", sec: "#f59e0b", secInk: "#14161f", dark: 1 },
+      // ここから先は、SK の色だけでなく、いろいろな場面に合わせたデザイン。face は、.pptx に書くフォント（font は画面で使うフォントの並び）
+      corporate: { label: t("コーポレート"), group: "biz", bg: "#ffffff", ink: "#0b1f3a", sub: "#4a5a73", accent: "#b8862b", soft: "#f6f1e4", blob: "#efe5c8", sec: "#0b1f3a", secInk: "#ffffff" },
+      indigo: { label: t("インディゴ"), group: "biz", bg: "#ffffff", ink: "#14143a", sub: "#50507a", accent: "#4338ca", soft: "#e8e8ff", blob: "#d6d6ff", sec: "#3730a3", secInk: "#ffffff" },
+      slate: { label: t("スレート"), group: "biz", bg: "#f4f6f8", ink: "#1c2530", sub: "#566273", accent: "#475569", soft: "#e2e8f0", blob: "#cbd5e1", sec: "#334155", secInk: "#ffffff" },
+      forest: { label: t("森"), group: "nature", bg: "#f7faf5", ink: "#12261a", sub: "#456352", accent: "#2f6f4e", soft: "#e5f0e8", blob: "#cfe5d6", sec: "#1f4d36", secInk: "#f7faf5" },
+      mint: { label: t("ミント"), group: "nature", bg: "#f6fffd", ink: "#0f2a29", sub: "#3d6663", accent: "#0d9488", soft: "#dcf5f1", blob: "#c3eee8", sec: "#0f766e", secInk: "#ffffff" },
+      sunset: { label: t("夕焼け"), group: "nature", bg: "#fffaf5", ink: "#2b1520", sub: "#6e4552", accent: "#e5484d", soft: "#ffece6", blob: "#ffd4c4", sec: "#b4232a", secInk: "#ffffff" },
+      lavender: { label: t("ラベンダー"), group: "soft", bg: "#fbf9ff", ink: "#241b3a", sub: "#5d5278", accent: "#7c5cd6", soft: "#f0eaff", blob: "#e1d6ff", sec: "#5b3fb0", secInk: "#ffffff" },
+      pastel: { label: t("パステル"), group: "soft", bg: "#fffdf7", ink: "#3b2f4a", sub: "#76688a", accent: "#e46a9a", soft: "#ffeef4", blob: "#ffe0ec", sec: "#8f6bd6", secInk: "#ffffff" },
+      pop: { label: t("ポップ"), group: "soft", bg: "#ffffff", ink: "#1a1a2e", sub: "#5a5a78", accent: "#f43f5e", soft: "#fff4cc", blob: "#ffe27a", sec: "#2563eb", secInk: "#ffffff" },
+      washi: { label: t("和紙"), group: "classic", bg: "#f8f3e8", ink: "#2a2118", sub: "#6a5a47", accent: "#b3261e", soft: "#efe6d3", blob: "#e4d6b8", sec: "#2a2118", secInk: "#f8f3e8", face: "Yu Mincho", font: '"Noto Serif JP","Yu Mincho","Hiragino Mincho ProN",serif' },
+      sepia: { label: t("セピア"), group: "classic", bg: "#f6efe2", ink: "#3a2c1d", sub: "#74624b", accent: "#8b5a2b", soft: "#ece0c9", blob: "#e0cfae", sec: "#6f451f", secInk: "#fff7ea", face: "Yu Mincho", font: '"Noto Serif JP","Yu Mincho","Hiragino Mincho ProN",serif' },
+      navy: { label: t("ネイビー"), group: "dark", bg: "#0d1b2e", ink: "#eaf1fb", sub: "#a9b8cf", accent: "#4fb3ff", soft: "#162840", blob: "#1d3556", sec: "#4fb3ff", secInk: "#0d1b2e", dark: 1 },
+      emerald: { label: t("エメラルド"), group: "dark", bg: "#08201a", ink: "#e6fff6", sub: "#9fcfbf", accent: "#34d399", soft: "#0f3128", blob: "#14412f", sec: "#34d399", secInk: "#08201a", dark: 1 },
+      gold: { label: t("ゴールド"), group: "dark", bg: "#1a1409", ink: "#f7ecd0", sub: "#c9b88e", accent: "#e0b04a", soft: "#2a2113", blob: "#3a2e18", sec: "#e0b04a", secInk: "#1a1409", dark: 1 },
+      neon: { label: t("ネオン"), group: "dark", bg: "#0b0b12", ink: "#f5f5ff", sub: "#b0b0d0", accent: "#00e5a8", soft: "#171726", blob: "#1f1f36", sec: "#ff3d9a", secInk: "#0b0b12", dark: 1 }
     };
+    var THEME_GROUPS = [["", t("SK のデザイン")], ["biz", t("ビジネス")], ["nature", t("自然・あたたかい")], ["soft", t("やわらかい・にぎやか")], ["classic", t("和・クラシック")], ["dark", t("暗い背景")]];
+    ["mikan", "ocean", "matcha", "sakura", "mono", "night"].forEach(function (k) { THEMES[k].group = ""; });
+    // テーマの色（と、あれば文字のフォント）を CSS にする。画面・サムネイル・発表・印刷のどれも、同じ .sl[data-theme] を使う
+    (function () {
+      var css = Object.keys(THEMES).map(function (k) {
+        var h = THEMES[k];
+        return '.sl[data-theme="' + k + '"] { --sl-bg: ' + h.bg + "; --sl-ink: " + h.ink + "; --sl-sub: " + h.sub + "; --sl-accent: " + h.accent + "; --sl-soft: " + h.soft + "; --sl-blob: " + h.blob + "; --sl-sec: " + h.sec + "; --sl-sec-ink: " + h.secInk + ";" + (h.font ? " --sl-font: " + h.font + ";" : "") + " }";
+      }).join("\n");
+      var st = document.getElementById("sl-themes") || document.head.appendChild(document.createElement("style"));
+      st.id = "sl-themes"; st.textContent = css;
+    })();
     var LAYOUTS = [
       { value: "title", label: t("タイトル スライド"), icon: "title" }, { value: "bullets", label: t("タイトルとコンテンツ"), icon: "format_list_bulleted" },
       { value: "two", label: t("2 つのコンテンツ"), icon: "view_column" }, { value: "section", label: t("セクション見出し"), icon: "splitscreen" },
@@ -48,6 +76,12 @@
         if (s.bg && !safeColor(s.bg)) delete s.bg;
         eachObj(s.objs, function (o) {
           if (o.html) o.html = cleanText(o.html);
+          if (o.type === "table") {
+            // 表: rows は文字の二次元配列（最大 30 行 × 20 列）。長さのそろわない行は空のセルで埋める
+            var rows = (Array.isArray(o.rows) ? o.rows : [[""]]).slice(0, 30).map(function (r) { return (Array.isArray(r) ? r : [r]).slice(0, 20).map(function (c) { return String(c === null || c === undefined ? "" : c); }); });
+            var cols = Math.max(1, rows.reduce(function (m, r) { return Math.max(m, r.length); }, 0));
+            o.rows = (rows.length ? rows : [[""]]).map(function (r) { while (r.length < cols) r.push(""); return r; });
+          }
           if (o.src && !/^(data:image\/|https:\/\/)/i.test(o.src)) o.src = "";
           ["fill", "line", "color"].forEach(function (k) { if (o[k] && o[k] !== "none" && !safeColor(o[k])) delete o[k]; });
           ["x", "y", "w", "h", "rot", "fs", "lw"].forEach(function (k) { if (o[k] !== undefined && !isFinite(+o[k])) delete o[k]; else if (o[k] !== undefined) o[k] = +o[k]; });
@@ -113,7 +147,13 @@
       var inner = "";
       if (o.type === "image") inner = '<img src="' + esc(o.src || "") + '" alt="' + esc(o.alt || "") + '" draggable="false">';
       else if (o.type === "chart") inner = Chart.svg(o.spec || {}, { w: Math.max(80, o.w * 9.6), h: Math.max(60, o.h * 9.6 / r), transparent: true });
-      else {
+      else if (o.type === "table") {
+        var head = o.head !== 0;
+        inner = '<table class="sl-tbl" style="' + fsCss(o.fs || 18) + '"><tbody>' + (o.rows || [[""]]).map(function (row, ri) {
+          var tag = head && ri === 0 ? "th" : "td";
+          return "<tr>" + row.map(function (c, ci) { return "<" + tag + ' data-r="' + ri + '" data-c="' + ci + '">' + esc(c).replace(/\n/g, "<br>") + "</" + tag + ">"; }).join("") + "</tr>";
+        }).join("") + "</tbody></table>";
+      } else {
         if (o.type === "shape") inner = shapeSvg(o);
         var ts = fsCss(o.fs || (o.type === "shape" ? 18 : 20)) + (o.color ? "color:" + o.color + ";" : o.type === "shape" && o.fill !== "none" ? "color:#fff;" : "") + (o.b ? "font-weight:700;" : "") + (o.i ? "font-style:italic;" : "") + (o.u ? "text-decoration:underline;" : "") +
           "text-align:" + ({ l: "left", c: "center", r: "right" }[o.align || (o.type === "shape" ? "c" : "l")]) + ";";
@@ -299,11 +339,45 @@
           return s;
         } }] });
     }
+    function addTable(rows, cols) {
+      var grid = []; for (var i = 0; i < rows; i++) { grid.push([]); for (var j = 0; j < cols; j++) grid[i].push(""); }
+      var o = addObj({ type: "table", rows: grid, head: 1, fs: 18, x: 10, y: 28, w: 80, h: Math.min(64, 12 * rows) });
+      if (o) startObjEdit(o);
+    }
+    // 表の中の、いま書いているセル（なければ null）
+    function focusCell() { var a = document.activeElement, c = a && a.closest && a.closest(".sl-tbl [data-r]"); return c ? { r: +c.getAttribute("data-r"), c: +c.getAttribute("data-c") } : null; }
+    function tableOps(o, at) {
+      var fc = focusCell(), rows = o.rows.length, cols = o.rows[0].length, r = fc ? fc.r : rows - 1, c = fc ? fc.c : cols - 1;
+      O.menu(at, [
+        { value: "rowAdd", label: t("下に行を挿入"), icon: "add_row_below" }, { value: "colAdd", label: t("右に列を挿入"), icon: "add_column_right" },
+        { value: "rowDel", label: t("行を削除"), icon: "table_rows", disabled: rows < 2 }, { value: "colDel", label: t("列を削除"), icon: "view_column", disabled: cols < 2 },
+        { sep: 1 }, { value: "head", label: t("見出しの行"), checked: o.head !== 0 }
+      ]).then(function (v) {
+        if (!v) return;
+        endObjEdit();
+        if (v === "rowAdd") o.rows.splice(r + 1, 0, o.rows[0].map(function () { return ""; }));
+        else if (v === "colAdd") o.rows.forEach(function (row) { row.splice(c + 1, 0, ""); });
+        else if (v === "rowDel") o.rows.splice(r, 1);
+        else if (v === "colDel") o.rows.forEach(function (row) { row.splice(c, 1); });
+        else if (v === "head") o.head = o.head === 0 ? 1 : 0;
+        redrawObj(o); refreshThumb(cur); changed();
+      });
+    }
     function addChart() { chartDialog().then(function (spec) { if (spec) addObj({ type: "chart", spec: spec, x: 18, y: 20, w: 64, h: 66 }); }); }
 
     // ---------- ものの文字を書く ----------
     function startObjEdit(o, selectAll) {
       if (readOnly || !o || o.type === "image" || o.type === "chart" || o.shape === "line") return;
+      if (o.type === "table") {
+        var cells = el("stage").querySelectorAll('[data-obj="' + o.id + '"] .sl-tbl [data-r]');
+        if (!cells.length) return;
+        editingObj = o.id;
+        Array.prototype.forEach.call(cells, function (c) { c.contentEditable = "true"; });
+        cells[0].focus();
+        el("frame").classList.add("is-edit");
+        O.sync();
+        return;
+      }
       var node = el("stage").querySelector('[data-obj="' + o.id + '"] .sl-tx');
       if (!node) return;
       editingObj = o.id;
@@ -317,6 +391,14 @@
     function endObjEdit() {
       if (!editingObj) return;
       var o = objById(editingObj), node = el("stage") && el("stage").querySelector('[data-obj="' + editingObj + '"] .sl-tx');
+      if (o && o.type === "table") {
+        var tds = el("stage").querySelectorAll('[data-obj="' + o.id + '"] .sl-tbl [data-r]'), rows = o.rows.map(function (r) { return r.slice(); });
+        Array.prototype.forEach.call(tds, function (c) { c.contentEditable = "false"; rows[+c.getAttribute("data-r")][+c.getAttribute("data-c")] = c.innerText.replace(/\n+$/, ""); });
+        editingObj = null;
+        if (el("frame")) el("frame").classList.remove("is-edit");
+        if (JSON.stringify(rows) !== JSON.stringify(o.rows)) { o.rows = rows; refreshThumb(cur); changed(); }
+        return;
+      }
       editingObj = null;
       if (el("frame")) el("frame").classList.remove("is-edit");
       if (node) { node.contentEditable = "false"; if (o) { var h = cleanText(node.innerHTML); if (h !== o.html) { o.html = h; refreshThumb(cur); changed(); } } }
@@ -472,7 +554,7 @@
       });
       stage.setAttribute("tabindex", "-1");
       stage.addEventListener("input", function (e) {
-        if (e.target.closest(".sl-tx")) { refreshThumbSoon(); changed(true); return; }
+        if (e.target.closest(".sl-tx, .sl-tbl")) { refreshThumbSoon(); changed(true); return; }
         var k = e.target.getAttribute && e.target.getAttribute("data-k");
         if (!k) return;
         var s = slide(), m = /^(items2?)\.(\d+)$/.exec(k);
@@ -481,7 +563,7 @@
         refreshThumbSoon();
         changed(true);
       });
-      stage.addEventListener("focusout", function (e) { if (editingObj && e.target.closest(".sl-tx") && !stage.contains(e.relatedTarget)) endObjEdit(); });
+      stage.addEventListener("focusout", function (e) { if (editingObj && e.target.closest(".sl-tx, .sl-tbl") && !stage.contains(e.relatedTarget)) endObjEdit(); });
       // 箇条書き: Enter で次の行・空の行で Backspace で消す。見出しの Enter は使わない
       stage.addEventListener("keydown", function (e) {
         if (e.isComposing) return;
@@ -648,6 +730,16 @@
       if (cmd.indexOf("present:") === 0) { var w = cmd.slice(8); present(w === "0" ? 0 : cur, w === "presenter"); return; }
       if (readOnly && !/^(notes|present)/.test(cmd)) { O.notify(t("閲覧モードでは書きかえられません")); return; }
       if (cmd.indexOf("shape:") === 0) return addShape(cmd.slice(6));
+      if (cmd === "themeMenu") {
+        var nowTheme = themeOf(data), items = [];
+        THEME_GROUPS.forEach(function (g) {
+          var ks = Object.keys(THEMES).filter(function (k) { return THEMES[k].group === g[0]; });
+          if (!ks.length) return;
+          items.push({ head: g[1] });
+          ks.forEach(function (k) { items.push({ value: k, label: THEMES[k].label, color: THEMES[k].dark ? THEMES[k].bg : THEMES[k].accent, checked: k === nowTheme }); });
+        });
+        return O.menu(at, items).then(function (v) { if (v) command("theme:" + v); });
+      }
       if (cmd.indexOf("theme:") === 0) { data.theme = cmd.slice(6); drawThumbs(); drawStage(); changed(); O.sync(); return; }
       if (cmd.indexOf("trans:") === 0) { s.trans = cmd.slice(6) === "none" ? undefined : cmd.slice(6); drawThumbs(true); changed(); O.sync(); return; }
       if (cmd.indexOf("anim:") === 0) { if (!o1) { O.notify(t("アニメーションを付けるものを選んでください")); return; } setObj({ anim: cmd.slice(5) || null }); O.sync(); return; }
@@ -697,6 +789,9 @@
         case "shapeMenu": return O.menu(at, SHAPES).then(function (v) { if (v) addShape(v); });
         case "image": return O.pickImage().then(addImage);
         case "chart": return addChart();
+        case "tableMenu":
+          return O.menu(at, [[2, 2], [3, 3], [4, 3], [3, 4], [5, 4], [6, 5]].map(function (x) { return { value: x[0] + "," + x[1], icon: "table", label: t("{r} 行 × {c} 列", { r: x[0], c: x[1] }) }; })).then(function (v) { if (v) addTable.apply(null, v.split(",").map(Number)); });
+        case "tableOps": if (o1 && o1.type === "table") tableOps(o1, at); else O.notify(t("表を選んでください")); return;
         case "bold": return inlineOrObj("bold", "b");
         case "italic": return inlineOrObj("italic", "i");
         case "underline": return inlineOrObj("underline", "u");
@@ -767,11 +862,12 @@
       { tab: t("挿入"), groups: [
         { label: t("スライド"), items: [{ big: 1, icon: "add_box", label: t("新しいスライド"), cmd: "addMenu", drop: 1 }] },
         { label: t("画像"), items: [{ big: 1, icon: "image", label: t("画像"), cmd: "image" }] },
+        { label: t("表"), items: [{ big: 1, icon: "table", label: t("表"), cmd: "tableMenu", drop: 1 }] },
         { label: t("図"), items: [{ big: 1, icon: "category", label: t("図形"), cmd: "shapeMenu", drop: 1 }, { big: 1, icon: "bar_chart", label: t("グラフ"), cmd: "chart" }] },
         { label: t("テキスト"), items: [{ big: 1, icon: "text_fields", label: t("テキスト ボックス"), cmd: "text" }] }
       ] },
       { tab: t("デザイン"), groups: [
-        { label: t("テーマ"), items: Object.keys(THEMES).map(function (k) { return { big: 1, icon: k === "night" ? "dark_mode" : "palette", label: THEMES[k].label, cmd: "theme:" + k, toggle: "theme:" + k }; }) },
+        { label: t("テーマ"), items: [{ big: 1, icon: "palette", label: t("テーマ"), cmd: "themeMenu", drop: 1 }].concat(["mikan", "ocean", "matcha", "sakura", "night", "corporate", "washi"].map(function (k) { return { big: 1, icon: THEMES[k].dark ? "dark_mode" : "palette", label: THEMES[k].label, cmd: "theme:" + k, toggle: "theme:" + k }; })) },
         { label: t("ユーザー設定"), items: [{ big: 1, icon: "aspect_ratio", label: t("スライドのサイズ"), cmd: "ratio", drop: 1 }, { big: 1, icon: "format_paint", label: t("背景の書式"), cmd: "bg", drop: 1 }, { stack: [{ icon: "done_all", label: t("背景をすべてに適用"), cmd: "bgAll" }] }] }
       ] },
       { tab: t("画面切り替え"), groups: [
@@ -792,7 +888,7 @@
         { label: t("配置"), items: [{ stack: [{ icon: "flip_to_front", label: t("最前面へ"), cmd: "order:front" }, { icon: "flip_to_back", label: t("最背面へ"), cmd: "order:back" }, { icon: "rotate_right", label: t("回転"), cmd: "rot90" }] },
           { rows: [[{ icon: "align_horizontal_left", label: t("左揃え"), cmd: "align:l" }, { icon: "align_horizontal_center", label: t("左右中央揃え"), cmd: "align:c" }, { icon: "align_horizontal_right", label: t("右揃え"), cmd: "align:r" }],
             [{ icon: "align_vertical_top", label: t("上揃え"), cmd: "align:t" }, { icon: "align_vertical_center", label: t("上下中央揃え"), cmd: "align:m" }, { icon: "align_vertical_bottom", label: t("下揃え"), cmd: "align:b" }]] }] },
-        { label: t("そのほか"), items: [{ big: 1, icon: "bar_chart", label: t("データの編集"), cmd: "chartEdit" }, { big: 1, icon: "image", label: t("画像の変更"), cmd: "imgReplace" }, { big: 1, icon: "description", label: t("代替テキスト"), cmd: "imgAlt" }, { big: 1, icon: "delete", label: t("削除"), cmd: "objDel" }] }
+        { label: t("そのほか"), items: [{ big: 1, icon: "bar_chart", label: t("データの編集"), cmd: "chartEdit" }, { big: 1, icon: "table_rows", label: t("表の操作"), cmd: "tableOps", drop: 1 }, { big: 1, icon: "image", label: t("画像の変更"), cmd: "imgReplace" }, { big: 1, icon: "description", label: t("代替テキスト"), cmd: "imgAlt" }, { big: 1, icon: "delete", label: t("削除"), cmd: "objDel" }] }
       ] }
     ];
     function state() {
@@ -951,7 +1047,7 @@
       return { mime: m[1], bytes: u8 };
     }
     function pptxFiles() {
-      var wide = data.ratio !== "4:3", SW = wide ? 12192000 : 9144000, SH = 6858000, th = THEMES[themeOf(data)];
+      var wide = data.ratio !== "4:3", SW = wide ? 12192000 : 9144000, SH = 6858000, th = THEMES[themeOf(data)], face = th.face || "Yu Gothic";
       var jobs = [];
       // グラフは PNG にする
       var pngs = {};
@@ -968,7 +1064,7 @@
         function emuY(p) { return Math.round(p / 100 * SH); }
         function runs(text, opt) {
           return '<a:r><a:rPr lang="ja-JP" sz="' + Math.round((opt.sz || 18) * 100) + '"' + (opt.b ? ' b="1"' : "") + (opt.i ? ' i="1"' : "") + (opt.u ? ' u="sng"' : "") + ' dirty="0"><a:solidFill><a:srgbClr val="' + (opt.color || hexOf(th.ink)) + '"/></a:solidFill>' +
-            '<a:latin typeface="Yu Gothic"/><a:ea typeface="Yu Gothic"/></a:rPr><a:t>' + X(text) + "</a:t></a:r>";
+            '<a:latin typeface="' + face + '"/><a:ea typeface="' + face + '"/></a:rPr><a:t>' + X(text) + "</a:t></a:r>";
         }
         function paras(lines, opt) {
           return lines.map(function (l) {
@@ -977,6 +1073,23 @@
           }).join("");
         }
         var nid;
+        // 表（a:tbl）。見出しの行はテーマの色、ほかは枠線だけ
+        function tbl(o, x, y, w, h) {
+          var rows = o.rows || [[""]], cols = rows[0].length, head = o.head !== 0, sz = o.fs || 18, ink = hexOf(th.ink), edge = "BFC3CC";
+          var cw = Math.floor(w / cols), rh = Math.floor(h / rows.length);
+          var ln = function (n) { return "<a:" + n + ' w="9525"><a:solidFill><a:srgbClr val="' + edge + '"/></a:solidFill></a:' + n + ">"; };
+          nid++;
+          return '<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="' + nid + '" name="Table ' + nid + '"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>' +
+            '<p:xfrm><a:off x="' + x + '" y="' + y + '"/><a:ext cx="' + cw * cols + '" cy="' + rh * rows.length + '"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table"><a:tbl>' +
+            '<a:tblPr' + (head ? ' firstRow="1"' : "") + "/><a:tblGrid>" + rows[0].map(function () { return '<a:gridCol w="' + cw + '"/>'; }).join("") + "</a:tblGrid>" +
+            rows.map(function (row, ri) {
+              var hd = head && ri === 0;
+              return '<a:tr h="' + rh + '">' + row.map(function (cell) {
+                return "<a:tc><a:txBody><a:bodyPr/><a:lstStyle/>" + paras(String(cell).split("\n"), { sz: sz, b: hd, color: hd ? "FFFFFF" : ink, align: "l" }) + "</a:txBody>" +
+                  '<a:tcPr anchor="ctr">' + ln("lnL") + ln("lnR") + ln("lnT") + ln("lnB") + (hd ? '<a:solidFill><a:srgbClr val="' + hexOf(th.accent) + '"/></a:solidFill>' : "<a:noFill/>") + "</a:tcPr></a:tc>";
+              }).join("") + "</a:tr>";
+            }).join("") + "</a:tbl></a:graphicData></a:graphic></p:graphicFrame>";
+        }
         function sp(name, x, y, w, h, body, o) {
           o = o || {};
           var geom = o.geom || "rect", fill = o.fill ? '<a:solidFill><a:srgbClr val="' + o.fill + '"/></a:solidFill>' : "<a:noFill/>", ln = o.line ? '<a:ln w="' + Math.round((o.lw == null ? 1.5 : o.lw) * 12700) + '"><a:solidFill><a:srgbClr val="' + o.line + '"/></a:solidFill></a:ln>' : "<a:ln><a:noFill/></a:ln>";
@@ -1034,6 +1147,7 @@
           function emitObj(o) {
             if (o.type === "group") return emitGroup(o);
             var x = emuX(o.x), y = emuY(o.y), w = Math.max(1, emuX(o.w)), h = Math.max(1, emuY(o.h));
+            if (o.type === "table") return tbl(o, x, y, w, h);
             if (o.type === "image" || o.type === "chart") {
               var src = pngs[o.id] || o.src, d = bytesOf(src);
               if (!d) return "";
@@ -1094,7 +1208,7 @@
           "<a:dk1>" + c(hexOf(th.ink)) + "</a:dk1><a:lt1>" + c(hexOf(th.bg)) + "</a:lt1><a:dk2>" + c(hexOf(th.sub)) + "</a:dk2><a:lt2>" + c(hexOf(th.soft)) + "</a:lt2>" +
           "<a:accent1>" + c(hexOf(th.accent)) + "</a:accent1><a:accent2>" + c("2563EB") + "</a:accent2><a:accent3>" + c("16A34A") + "</a:accent3><a:accent4>" + c("F59E0B") + "</a:accent4><a:accent5>" + c("DB2777") + "</a:accent5><a:accent6>" + c("7C3AED") + "</a:accent6>" +
           "<a:hlink>" + c("1D4ED8") + "</a:hlink><a:folHlink>" + c("7C3AED") + "</a:folHlink></a:clrScheme>" +
-          '<a:fontScheme name="SK Hub Office"><a:majorFont><a:latin typeface="Yu Gothic"/><a:ea typeface="Yu Gothic"/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="Yu Gothic"/><a:ea typeface="Yu Gothic"/><a:cs typeface=""/></a:minorFont></a:fontScheme>' +
+          '<a:fontScheme name="SK Hub Office"><a:majorFont><a:latin typeface="' + face + '"/><a:ea typeface="' + face + '"/><a:cs typeface=""/></a:majorFont><a:minorFont><a:latin typeface="' + face + '"/><a:ea typeface="' + face + '"/><a:cs typeface=""/></a:minorFont></a:fontScheme>' +
           '<a:fmtScheme name="SK Hub Office"><a:fillStyleLst>' + fill3 + fill3 + fill3 + '</a:fillStyleLst><a:lnStyleLst><a:ln w="6350"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="12700"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln><a:ln w="19050"><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:ln></a:lnStyleLst>' +
           "<a:effectStyleLst><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle><a:effectStyle><a:effectLst/></a:effectStyle></a:effectStyleLst><a:bgFillStyleLst>" + fill3 + fill3 + fill3 + "</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>";
         if (hasNotes) {
@@ -1158,7 +1272,7 @@
         function objFont(o) { return Math.max(6, Math.min(96, +o.fs || (o.type === "shape" ? 18 : 20))); }
         function textOpts(o, col, fill) {
           var a = { x: X(o.x), y: Y(o.y), w: Math.max(0.05, X(o.w)), h: Math.max(0.05, Y(o.h)),
-            fontFace: "Yu Gothic", fontSize: objFont(o), color: col, bold: !!o.b, italic: !!o.i,
+            fontFace: th.face || "Yu Gothic", fontSize: objFont(o), color: col, bold: !!o.b, italic: !!o.i,
             underline: o.u ? { style: "sng" } : undefined, margin: 0, breakLine: false, fit: "shrink",
             align: { l: "left", c: "center", r: "right" }[o.align || "l"],
             valign: { t: "top", m: "middle", b: "bottom" }[o.va || "t"], rotate: +o.rot || 0 };
@@ -1232,6 +1346,19 @@
               try { slide.addChart(ctype, cdata, co); } catch (e) {}
               return;
             }
+            if (o.type === "table") {
+              var trows = o.rows || [[""]], thead = o.head !== 0;
+              var cellsData = trows.map(function (row, ri) {
+                var hd = thead && ri === 0;
+                return row.map(function (c) {
+                  var opts = { bold: hd, color: hd ? "FFFFFF" : color(th.ink), valign: "middle" };
+                  if (hd) opts.fill = { color: color(th.accent) };
+                  return { text: String(c), options: opts };
+                });
+              });
+              try { slide.addTable(cellsData, { x: X(o.x), y: Y(o.y), w: Math.max(0.5, X(o.w)), rowH: Math.max(0.2, Y(o.h) / trows.length), fontSize: objFont(o), border: { type: "solid", pt: 0.75, color: "BFC3CC" } }); } catch (e) {}
+              return;
+            }
             var lines = plain(o.html);
             if (o.type === "shape") {
               if (o.shape === "line") {
@@ -1251,7 +1378,7 @@
             slide.background = { color: bg };
             var ink = color(sec ? th.secInk : th.ink), sub = color(sec ? th.secInk : th.sub), isCenter = sec;
             function tOpt(size, bold, col, align) {
-              return { x: X(8), w: X(84), fontFace: "Yu Gothic", fontSize: size, color: col, bold: !!bold,
+              return { x: X(8), w: X(84), fontFace: th.face || "Yu Gothic", fontSize: size, color: col, bold: !!bold,
                 align: align || (isCenter ? "center" : "left"), valign: "middle", margin: 0, fit: "shrink", breakLine: false };
             }
             if (lay === "title" || lay === "section") {
@@ -1262,7 +1389,7 @@
               function bullets(items, x, w) {
                 var list = (items || []).filter(function (x) { return x; });
                 if (!list.length) return;
-                var body = { x: X(x), y: Y(24), w: X(w), h: Y(66), fontFace: "Yu Gothic", fontSize: 22, color: ink, margin: 0,
+                var body = { x: X(x), y: Y(24), w: X(w), h: Y(66), fontFace: th.face || "Yu Gothic", fontSize: 22, color: ink, margin: 0,
                   valign: "top", align: "left", fit: "shrink", breakLine: true };
                 slide.addText(list.map(function (x) { return { text: String(x), options: { bullet: true, breakLine: true } }; }), body);
               }
@@ -1294,8 +1421,12 @@
             // PptxGenJS は画面切り替えを書かないので、XML に足す
             data.slides.forEach(function (s, i) {
               var p = "ppt/slides/slide" + (i + 1) + ".xml";
-              if (!out[p] || !s.trans || s.trans === "none") return;
-              var xml = Zip.text(out[p]);
+              if (!out[p]) return;
+              var xml = Zip.text(out[p]), heads = [];
+              eachObj(s.objs, function (o) { if (o.type === "table") heads.push(o.head !== 0); });
+              // PptxGenJS の表には「見出しの行」の印が付かないので、足す（表は書いた順に並ぶ）
+              if (heads.length) { var ti = 0; xml = xml.replace(/<a:tblPr\b/g, function (m) { return heads[ti++] ? m + ' firstRow="1"' : m; }); out[p] = xml; }
+              if (!s.trans || s.trans === "none") return;
               var tag = s.trans === "fade" ? '<p:transition spd="med"><p:fade/></p:transition>' :
                 s.trans === "push" ? '<p:transition spd="med"><p:push dir="l"/></p:transition>' :
                 s.trans === "zoom" ? '<p:transition spd="med"><p:zoom/></p:transition>' : "";
@@ -1457,6 +1588,15 @@
               } else if (c.localName === "pic") {
                 var p = objFromPic(c, space);
                 if (p) out.push(p);
+              } else if (c.localName === "graphicFrame") {
+                // 表（a:tbl）。結合したセルは、左上だけに文字が入る
+                var tb = kids(c, "tbl")[0], gt = tb && coords(c, space);
+                if (!tb || !gt) return;
+                var trs = kids(tb, "tr").filter(function (tr) { return tr.parentNode === tb; });
+                var grid = trs.map(function (tr) { return Array.prototype.filter.call(tr.children, function (x) { return x.localName === "tc"; }).map(function (tc) { return parasOf(tc).join("\n").replace(/\n+$/, ""); }); });
+                if (!grid.length || !grid[0].length) return;
+                var tr1 = kids(tb, "rPr")[0], tp = kid(tb, "tblPr");
+                out.push({ id: uid(), type: "table", rows: grid, head: tp && tp.getAttribute("firstRow") === "1" ? 1 : 0, fs: tr1 && tr1.getAttribute("sz") ? +tr1.getAttribute("sz") / 100 : 18, x: gt.x, y: gt.y, w: gt.w, h: gt.h });
               } else if (c.localName === "grpSp") {
                 var g = coords(c, space);
                 if (!g) return;

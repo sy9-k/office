@@ -60,6 +60,9 @@
           style: [{ sel: "img[data-anc]", css: { position: "absolute", left: "30px", top: "12px" } }] } },
       { id: "vert", name: "縦書き", data: { html: "<h1>縦書きの文書</h1><p>吾輩は猫である。名前はまだ無い。</p>", page: { size: "b5", vert: true } },
         expect: { text: ["縦書きの文書", "吾輩は猫である"] } },
+      // デザイン: 見出しの色・フォント・h2 の線が、.docx の styles.xml に書かれる
+      { id: "design", name: "デザインのテスト", data: { html: "<h1>表題</h1><h2>見出し 1</h2><h3>見出し 2</h3><blockquote>引用</blockquote><p>本文</p>", page: { design: "washi" } },
+        expect: { text: ["表題", "見出し 1", "見出し 2", "引用", "本文"] } },
       { id: "empty", name: "からっぽ", data: { html: "" }, expect: { text: [] } }
     ],
 
@@ -82,7 +85,9 @@
           filter: { r: 1, c1: 0, c2: 4 },
           cf: [{ ref: "B2:B3", type: "gt", v: "3", color: "#ffcdd2" }, { ref: "C2:C3", type: "lt", v: "100", color: "#c8e6c9" }, { ref: "B2:B3", type: "eq", v: "5", color: "#bbdefb" },
                { ref: "A2:A3", type: "text", v: "り", color: "#fff9c4" }, { ref: "A2:A4", type: "dup", color: "#f8bbd0" }, { ref: "D2:D3", type: "bar", color: "#2a78d6" }, { ref: "C2:C3", type: "scale" }],
-          charts: [{ id: "ch1", type: "col", ref: "A1:B3", title: "数", x: 400, y: 40, w: 360, h: 220 }, { id: "ch2", type: "pie", ref: "A1:B3", title: "円", x: 400, y: 280, w: 300, h: 220 }],
+          charts: [{ id: "ch1", type: "col", ref: "A1:B3", title: "数", x: 400, y: 40, w: 360, h: 220 }, { id: "ch2", type: "pie", ref: "A1:B3", title: "円", x: 400, y: 280, w: 300, h: 220 },
+            { id: "ch3", type: "bar", ref: "A1:C3", title: "", x: 40, y: 520, w: 320, h: 200 }, { id: "ch4", type: "line", ref: "A1:C3", title: "折れ線", x: 400, y: 520, w: 320, h: 200 },
+            { id: "ch5", type: "area", ref: "A1:B3", title: "面", x: 40, y: 740, w: 320, h: 200 }, { id: "ch6", type: "scatter", ref: "B1:C3", title: "散布", x: 400, y: 740, w: 320, h: 200 }],
           dv: [
             { ref: "B2:B3", type: "whole", op: "between", f1: "1", f2: "10", allowBlank: true, promptTitle: "数を入れてください", prompt: "1〜10 の整数", errTitle: "入力を確認", err: "1〜10 の整数を入れてください", style: "stop" },
             { ref: "C2:C3", type: "decimal", op: "greaterThan", f1: "0", f2: "", allowBlank: true, promptTitle: "", prompt: "", errTitle: "", err: "", style: "warning" },
@@ -91,7 +96,12 @@
           notes: { A2: { text: "りんごのメモ", author: "テストの人", ts: 1760000000000 }, D2: { text: "金額は数式です", author: "テストの人", ts: 1760000000000 } } },
         { name: "データ", cells: { A1: "データ", B1: "=売上!B2*2" }, grid: false },
         { name: "空白 のシート", cells: {} }
-      ] }, expect: { sheets: 3, cf: { "売上": "bar,dup,eq,gt,lt,scale,text" }, cells: { "売上!A1": "品名", "売上!D2": "360", "売上!D4": "¥760", "売上!E2": "2026/10/22", "売上!F2": "400", "売上!F3": "りんご・みかん", "売上!F4": "多い",
+      ] }, expect: { sheets: 3, cf: { "売上": "bar,dup,eq,gt,lt,scale,text" },
+        charts: { "売上": [
+          { type: "col", ref: "A1:B3", title: "数", x: 400, y: 40, w: 360, h: 220 }, { type: "pie", ref: "A1:B3", title: "円", x: 400, y: 280, w: 300, h: 220 },
+          { type: "bar", ref: "A1:C3", title: "", x: 40, y: 520, w: 320, h: 200 }, { type: "line", ref: "A1:C3", title: "折れ線", x: 400, y: 520, w: 320, h: 200 },
+          { type: "area", ref: "A1:B3", title: "面", x: 40, y: 740, w: 320, h: 200 }, { type: "scatter", ref: "B1:C3", title: "散布", x: 400, y: 740, w: 320, h: 200 }] },
+        cells: { "売上!A1": "品名", "売上!D2": "360", "売上!D4": "¥760", "売上!E2": "2026/10/22", "売上!F2": "400", "売上!F3": "りんご・みかん", "売上!F4": "多い",
         "売上!F5": "りんごみかん", "売上!G3": "0123", "売上!G4": "データです", "売上!G5": "みかん", "データ!B1": "6", "売上!A7": "1行目\n2行目" },
         dv: { "売上": [
           { ref: "B2:B3", type: "whole", op: "between", f1: "1", f2: "10", style: "stop", promptTitle: "数を入れてください", prompt: "1〜10 の整数", errTitle: "入力を確認", err: "1〜10 の整数を入れてください" },
@@ -123,10 +133,12 @@
           { id: "g1", type: "group", x: 86, y: 4, w: 11, h: 38, rot: 5, children: [
             { id: "g1a", type: "shape", shape: "rect", x: 0, y: 0, w: 100, h: 45, html: "グループの図形", fill: "#16a34a", line: "#111111", lw: 4.5 },
             { id: "g1b", type: "text", x: 0, y: 55, w: 100, h: 45, html: "グループの文字", fs: 12 }
-          ] }
+          ] },
+          { id: "tb1", type: "table", x: 5, y: 68, w: 30, h: 22, head: 1, fs: 14, rows: [["品名", "数"], ["りんご <&>", "3"], ["みかん", "5\n(複数行)"]] }
         ], notes: "ものの<ノート> & \"引用\"" },
         { layout: "blank" }
-      ] }, expect: { slides: 6, text: ["発表のタイトル", "サブタイトル", "一つ目", "二つ目 <&>", "左", "右", "セクション", "テキスト", "図形の文字", "グループの図形", "グループの文字"], groups: 1, groupChildren: 2, lw: [2.25, 6, 4.5], notes: ["最初のノート", "箇条書きのノート", "ものの<ノート> & \"引用\""], chart: true, transitions: 3 } },
+      ] }, expect: { slides: 6, text: ["発表のタイトル", "サブタイトル", "一つ目", "二つ目 <&>", "左", "右", "セクション", "テキスト", "図形の文字", "グループの図形", "グループの文字"], groups: 1, groupChildren: 2, lw: [2.25, 6, 4.5], notes: ["最初のノート", "箇条書きのノート", "ものの<ノート> & \"引用\""], chart: true, transitions: 3, tables: [{ rows: [["品名", "数"], ["りんご <&>", "3"], ["みかん", "5\n(複数行)"]], head: 1 }] } },
+      { id: "washi", name: "和紙のテーマ", data: { theme: "washi", slides: [{ layout: "title", title: "和紙のタイトル", sub: "明朝の見た目" }, { layout: "section", title: "セクション" }] }, expect: { slides: 2, text: ["和紙のタイトル", "明朝の見た目"] } },
       { id: "four", name: "4:3 と夜のテーマ", data: { theme: "night", ratio: "4:3", slides: [{ layout: "title", title: "4:3" }] }, expect: { slides: 1, text: ["4:3"] } }
     ]
   };

@@ -33,6 +33,7 @@
   function clip(s, size, max) { s = String(s); if (textW(s, size) <= max) return s; var a = Array.from(s); while (a.length > 1 && textW(a.join("") + "…", size) > max) a.pop(); return a.join("") + "…"; }
 
   function fromRows(rows) {
+    var total = (rows || []).length;
     rows = (rows || []).filter(function (r) { return r.some(function (v) { return v !== null && v !== ""; }); });
     if (!rows.length) return { cats: [], series: [] };
     var isNum = function (v) { return typeof v === "number"; };
@@ -42,10 +43,11 @@
     var cats = body.map(function (r, i) { return catCol ? (r[0] === null ? "" : String(r[0])) : String(i + 1); });
     var series = [];
     for (var c = start; c < w; c++) {
-      series.push({ name: headRow ? String(rows[0][c] === null ? "" : rows[0][c]) : "系列 " + (c - start + 1), values: body.map(function (r) { return isNum(r[c]) ? r[c] : null; }) });
+      series.push({ name: headRow ? String(rows[0][c] === null ? "" : rows[0][c]) : "系列 " + (c - start + 1), col: c, values: body.map(function (r) { return isNum(r[c]) ? r[c] : null; }) });
     }
     series = series.filter(function (s) { return s.values.some(function (v) { return v !== null; }); });
-    return { cats: cats, series: series };
+    // head・catCol・dropped は、もとのセルの範囲を指すのに使う（Excel のグラフに書き出すとき。dropped は、空の行を飛ばしたしるし）
+    return { cats: cats, series: series, head: headRow, catCol: catCol, dropped: rows.length !== total };
   }
 
   function svg(spec, o) {

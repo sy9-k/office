@@ -246,11 +246,29 @@
       (expect.lw || []).forEach(function (w) {
         if (!flat.some(function (o) { return Math.abs(+o.lw - w) < 0.01; })) bad.push("線の太さがありません: " + w + " pt");
       });
+      (expect.tables || []).forEach(function (want, i) {
+        var got = flat.filter(function (o) { return o.type === "table"; })[i];
+        if (!got) bad.push("表 " + (i + 1) + " がありません");
+        else {
+          if (JSON.stringify(got.rows) !== JSON.stringify(want.rows)) bad.push("表の中身: " + JSON.stringify(got.rows));
+          if ((got.head === 0 ? 0 : 1) !== want.head) bad.push("表の見出しの行: " + got.head);
+        }
+      });
       var notes = data.slides.map(function (s) { return s.notes || ""; }).join("\n");
       (expect.notes || []).forEach(function (x) { if (notes.indexOf(x) < 0) bad.push("ノートがありません: " + x); });
       return Promise.resolve(bad);
     }
     if (expect.sheets !== undefined && data.sheets.length !== expect.sheets) bad.push("シートの数: " + data.sheets.length + "（" + expect.sheets + " のはず）");
+    // グラフ: { シート名: [{ type, ref, title }] }（順番どおり）。位置は、元の場所から 2 セル以内
+    Object.keys(expect.charts || {}).forEach(function (name) {
+      var s = data.sheets.filter(function (x) { return x.name === name; })[0], got = s ? s.charts || [] : [], want = expect.charts[name];
+      if (got.length !== want.length) { bad.push(name + " のグラフの数: " + got.length + "（" + want.length + " のはず）"); return; }
+      want.forEach(function (w, i) {
+        var g = got[i];
+        if (g.type !== w.type || g.ref !== w.ref || (g.title || "") !== (w.title || "")) bad.push(name + " のグラフ " + (i + 1) + ": " + [g.type, g.ref, g.title].join("|") + "（" + [w.type, w.ref, w.title || ""].join("|") + " のはず）");
+        if (Math.abs(g.x - w.x) > 200 || Math.abs(g.y - w.y) > 60 || Math.abs(g.w - w.w) > 2 || Math.abs(g.h - w.h) > 2) bad.push(name + " のグラフ " + (i + 1) + " の場所: " + [g.x, g.y, g.w, g.h].join(",") + "（" + [w.x, w.y, w.w, w.h].join(",") + " のはず）");
+      });
+    });
     Object.keys(expect.cf || {}).forEach(function (name) {
       var s = data.sheets.filter(function (x) { return x.name === name; })[0], got = s ? (s.cf || []).map(function (r) { return r.type; }).sort().join(",") : "";
       if (got !== expect.cf[name]) bad.push(name + " の条件付き書式: " + got + "（" + expect.cf[name] + " のはず）");
@@ -472,6 +490,69 @@
     }).catch(function (e) { log(false, "doc", "third-party", "docx の anchor を読みこむ", (e && e.stack) || String(e)); });
   }
 
+  // 文字スタイル（rStyle）と表のスタイル（tblStyle＋条件付きの書式）を読みこめるか。手で組んだ最小の .docx
+  function styleImportTest() {
+    var W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"', H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    var cell = function (t) { return "<w:tc><w:tcPr><w:tcW w:w=\"2000\" w:type=\"dxa\"/></w:tcPr><w:p><w:r><w:t>" + t + "</w:t></w:r></w:p></w:tc>"; };
+    var files = {
+      "[Content_Types].xml": H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>',
+      "_rels/.rels": H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+      "word/_rels/document.xml.rels": H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>',
+      "word/styles.xml": H + "<w:styles " + W + ">" +
+        '<w:style w:type="character" w:styleId="Strong0"><w:name w:val="Strong0"/><w:rPr><w:b/><w:color w:val="C00000"/></w:rPr></w:style>' +
+        '<w:style w:type="character" w:styleId="Child"><w:name w:val="Child"/><w:basedOn w:val="Strong0"/><w:rPr><w:i/></w:rPr></w:style>' +
+        '<w:style w:type="table" w:styleId="Grid1"><w:name w:val="Grid1"/><w:tblPr><w:tblStyleRowBandSize w:val="1"/><w:tblBorders><w:top w:val="single" w:sz="8" w:color="112233"/><w:left w:val="single" w:sz="8" w:color="112233"/><w:bottom w:val="single" w:sz="8" w:color="112233"/><w:right w:val="single" w:sz="8" w:color="112233"/><w:insideH w:val="single" w:sz="8" w:color="112233"/><w:insideV w:val="single" w:sz="8" w:color="112233"/></w:tblBorders></w:tblPr>' +
+        '<w:tblStylePr w:type="firstRow"><w:rPr><w:b/><w:color w:val="FFFFFF"/></w:rPr><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="4472C4"/></w:tcPr></w:tblStylePr>' +
+        '<w:tblStylePr w:type="band1Horz"><w:tcPr><w:shd w:val="clear" w:color="auto" w:fill="D9E2F3"/></w:tcPr></w:tblStylePr></w:style></w:styles>',
+      "word/document.xml": H + "<w:document " + W + "><w:body>" +
+        '<w:p><w:r><w:rPr><w:rStyle w:val="Child"/></w:rPr><w:t>styled</w:t></w:r></w:p>' +
+        '<w:tbl><w:tblPr><w:tblStyle w:val="Grid1"/><w:tblLook w:val="04A0" w:firstRow="1" w:lastRow="0" w:firstColumn="1" w:lastColumn="0" w:noHBand="0" w:noVBand="1"/></w:tblPr><w:tblGrid><w:gridCol w:w="2000"/><w:gridCol w:w="2000"/></w:tblGrid>' +
+        "<w:tr>" + cell("h1") + cell("h2") + "</w:tr><w:tr>" + cell("a1") + cell("a2") + "</w:tr><w:tr>" + cell("b1") + cell("b2") + "</w:tr></w:tbl>" +
+        "<w:p/></w:body></w:document>"
+    };
+    return Zip.write(files).then(function (blob) {
+      var back = open("doc", "style-import", { html: "" });
+      return back.App.importFile(new File([blob], "style-import.docx")).then(function (data) {
+        var holder = document.createElement("div"); holder.innerHTML = data.html;
+        var bad = [], run = holder.querySelector("b"), rows = holder.querySelectorAll("tr");
+        var inner = run && (run.querySelector("i") || run.closest("i") || (run.parentNode && run.parentNode.tagName === "I" ? run.parentNode : null));
+        if (!run) bad.push("rStyle の太字がありません");
+        else if (!run.closest("span[style*='C00000'], span[style*='rgb(192, 0, 0)']") && !run.querySelector("span[style*='c00000']")) bad.push("rStyle の色がありません");
+        if (!inner) bad.push("basedOn をたどった斜体がありません");
+        if (rows.length !== 3) bad.push("行が " + rows.length);
+        else {
+          var bg = function (tr) { return tr.cells[0].style.backgroundColor; };
+          if (!/4472c4|68, 114, 196/i.test(bg(rows[0]))) bad.push("見出し行の塗り: " + bg(rows[0]));
+          if (!/d9e2f3|217, 226, 243/i.test(bg(rows[1]))) bad.push("縞（1 行目）の塗り: " + bg(rows[1]));
+          if (bg(rows[2])) bad.push("縞（2 行目）に塗りがあります: " + bg(rows[2]));
+          if (!/112233|17, 34, 51/i.test(rows[1].cells[1].style.borderTop)) bad.push("スタイルの罫線: " + rows[1].cells[1].style.borderTop);
+          if (rows[0].cells[0].style.fontWeight !== "bold") bad.push("見出し行が太字ではありません");
+        }
+        log(!bad.length, "doc", "style-import", "rStyle・tblStyle を読みこむ", bad.join(" / ") || "文字スタイル・表の罫線・見出し行・縞");
+      });
+    }).catch(function (e) { log(false, "doc", "style-import", "rStyle・tblStyle を読みこむ", (e && e.stack) || String(e)); });
+  }
+
+  // ほかのソフト（openpyxl）が作った .xlsx のグラフを読みこめるか。範囲にできるグラフ 2 つだけ読み、項目の列が離れたものは読まない
+  function thirdPartyChartTest() {
+    return fetch("/_tests/office/input/third-party-chart.xlsx").then(function (r) { return r.ok ? r.blob() : null; }).then(function (blob) {
+      if (!blob) return;
+      var back = open("sheet", "third-party-chart", { v: 2, cur: 0, sheets: [{ name: "Sheet1", cells: {} }] });
+      return back.App.importFile(new File([blob], "third-party-chart.xlsx")).then(function (data) {
+        var s = data.sheets[0], got = (s.charts || []).map(function (c) { return [c.type, c.ref, c.title].join("|"); }), want = ["col|A1:C4|月ごと", "line|B1:B4|売上だけ"], bad = [];
+        if (got.join(",") !== want.join(",")) bad.push("グラフ: " + got.join(",") + "（" + want.join(",") + " のはず）");
+        else {
+          var a = s.charts[0], b = s.charts[1];
+          // E2 は、4 列目（96px×4）・1 行目の下。幅 15cm・高さ 7.5cm
+          if (Math.abs(a.x - (44 + 96 * 4)) > 2 || Math.abs(a.y - (28 + 28)) > 2) bad.push("1 つ目の場所: " + a.x + "," + a.y);
+          if (Math.abs(a.w - 567) > 3 || Math.abs(a.h - 283) > 3) bad.push("1 つ目の大きさ: " + a.w + "×" + a.h);
+          if (b.y <= a.y) bad.push("2 つ目の場所: " + b.x + "," + b.y);
+        }
+        log(!bad.length, "sheet", "third-party-chart", "xlsx のグラフを読みこむ", bad.join(" / ") || "縦棒と折れ線");
+      });
+    }).catch(function (e) { log(false, "sheet", "third-party-chart", "xlsx のグラフを読みこむ", (e && e.stack) || String(e)); });
+  }
+
   var list = [];
   ["doc", "sheet", "slide"].forEach(function (app) {
     (window.OFFICE_TEMPLATES[app] || []).forEach(function (tp) { list.push([app, { id: "tpl-" + tp.id, name: tp.name, data: tp.data }]); });
@@ -483,9 +564,13 @@
   list.reduce(function (p, x) { return p.then(function () { return runOne(x[0], x[1]); }); }, Promise.resolve()).then(function () {
     if (!only || only[1] === "sheet") return virtualTest();
   }).then(function () {
+    if (!only || only[1] === "sheet") return thirdPartyChartTest();
+  }).then(function () {
     if (!only || only[1] === "drive") return driveTest();
   }).then(function () {
     if (!only || only[1] === "doc") return thirdPartyAnchorTest();
+  }).then(function () {
+    if (!only || only[1] === "doc") return styleImportTest();
   }).catch(function (e) { log(false, "-", "-", "エラー", (e && e.stack) || String(e)); }).then(function () {
     var ng = results.filter(function (r) { return !r.ok; }).length;
     var sum = document.getElementById("sum");

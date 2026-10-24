@@ -741,6 +741,88 @@
         if (Object.keys(st).length) sh.style[k] = st; else delete sh.style[k];
       });
     }
+    // ---------- デザイン: テーブルのスタイル（見出しの行・縞・罫線）とセルのスタイル。どちらもセルの書式にするので、.xlsx にもそのまま書き出される ----------
+    //   head・fg: 見出しの行の色と文字の色。band: 1 行おきの縞の色。bd: "all" 全部の罫線・"h" 横線だけ・"" なし
+    var TSTYLES = [
+      { id: "plain", label: t("シンプル"), group: "light", head: "#eceff1", fg: "#111111", bd: "h" },
+      { id: "slate", label: t("スレート"), group: "light", head: "#475569", fg: "#ffffff", band: "#e2e8f0", bd: "" },
+      { id: "mono", label: t("モノクロ"), group: "light", head: "#111111", fg: "#ffffff", band: "#f2f2f2", bd: "all" },
+      { id: "matcha", label: t("抹茶"), group: "sk", head: "#16a34a", fg: "#ffffff", band: "#e9f6ea", bd: "" },
+      { id: "ocean", label: t("海"), group: "sk", head: "#2563eb", fg: "#ffffff", band: "#eaf1ff", bd: "" },
+      { id: "mikan", label: t("みかん"), group: "sk", head: "#ea580c", fg: "#ffffff", band: "#fff1ec", bd: "" },
+      { id: "sakura", label: t("さくら"), group: "sk", head: "#db2777", fg: "#ffffff", band: "#fdeef4", bd: "" },
+      { id: "navy", label: t("ネイビー"), group: "biz", head: "#0b1f3a", fg: "#ffffff", band: "#eef2f8", bd: "h" },
+      { id: "gold", label: t("ゴールド"), group: "biz", head: "#b8862b", fg: "#ffffff", band: "#f6f1e4", bd: "h" },
+      { id: "indigo", label: t("インディゴ"), group: "biz", head: "#4338ca", fg: "#ffffff", band: "#e8e8ff", bd: "" },
+      { id: "dark", label: t("ダーク"), group: "biz", head: "#1f2937", fg: "#ffffff", band: "#f3f4f6", bd: "all" },
+      { id: "forest", label: t("森"), group: "color", head: "#2f6f4e", fg: "#ffffff", band: "#e5f0e8", bd: "" },
+      { id: "mint", label: t("ミント"), group: "color", head: "#0d9488", fg: "#ffffff", band: "#dcf5f1", bd: "" },
+      { id: "sunset", label: t("夕焼け"), group: "color", head: "#e5484d", fg: "#ffffff", band: "#ffece6", bd: "" },
+      { id: "lavender", label: t("ラベンダー"), group: "color", head: "#7c5cd6", fg: "#ffffff", band: "#f0eaff", bd: "" },
+      { id: "pastel", label: t("パステル"), group: "color", head: "#e46a9a", fg: "#ffffff", band: "#ffeef4", bd: "" },
+      { id: "washi", label: t("和紙"), group: "color", head: "#b3261e", fg: "#ffffff", band: "#efe6d3", bd: "h" }
+    ];
+    var TSTYLE_GROUPS = [["light", t("淡い・シンプル")], ["sk", t("SK のデザイン")], ["biz", t("ビジネス")], ["color", t("いろいろな色")]];
+    var CSTYLES = [
+      // 見出し系は、文字色を決めない（ダークモードでも、テーマの文字色で読める）
+      { id: "title", label: t("タイトル"), group: "head", st: { b: 1, fs: 18 } },
+      { id: "h1", label: t("見出し 1"), group: "head", st: { b: 1, fs: 15, bd: { b: 2 } } },
+      { id: "h2", label: t("見出し 2"), group: "head", st: { b: 1, fs: 13, bd: { b: 1 } } },
+      { id: "h3", label: t("見出し 3"), group: "head", st: { b: 1, i: 1 } },
+      { id: "good", label: t("良い"), group: "status", st: { bg: "#c6efce", fg: "#006100" } },
+      { id: "bad", label: t("悪い"), group: "status", st: { bg: "#ffc7ce", fg: "#9c0006" } },
+      { id: "neutral", label: t("どちらでもない"), group: "status", st: { bg: "#ffeb9c", fg: "#9c5700" } },
+      { id: "warn", label: t("警告"), group: "status", st: { fg: "#ff0000", b: 1 } },
+      { id: "note", label: t("メモ"), group: "status", st: { bg: "#fff2cc", fg: "#333333", bd: { t: 1, r: 1, b: 1, l: 1 } } },
+      { id: "input", label: t("入力"), group: "data", st: { bg: "#ffcc99", fg: "#3f3f76", bd: { t: 1, r: 1, b: 1, l: 1 } } },
+      { id: "output", label: t("出力"), group: "data", st: { bg: "#f2f2f2", fg: "#3f3f3f", b: 1, bd: { t: 1, r: 1, b: 1, l: 1 } } },
+      { id: "calc", label: t("計算"), group: "data", st: { bg: "#f2f2f2", fg: "#fa7d00", b: 1 } },
+      { id: "total", label: t("集計"), group: "data", st: { b: 1, bd: { t: 1, b: 2 } } },
+      { id: "key", label: t("強調"), group: "data", st: { bg: "#dbe7ff", fg: "#1d4ed8", b: 1 } }
+    ];
+    var CSTYLE_GROUPS = [["head", t("タイトルと見出し")], ["status", t("良い・悪い・メモ")], ["data", t("データと計算")]];
+    var STYLE_KEYS = ["b", "i", "u", "s", "fs", "fg", "bg", "bd"];
+    function applyTableStyle(id) {
+      var g = workRange(), ts = TSTYLES.filter(function (x) { return x.id === id; })[0];
+      if (!ts) { setStyle(g, { bg: null, fg: null, bd: null }); changed(); return; }
+      if (isOne(g) && !filled(g.c1, g.r1)) { O.notify(t("スタイルを付けるデータを選んでください")); return; }
+      var bd = ts.bd === "all" ? { t: 1, r: 1, b: 1, l: 1 } : ts.bd === "h" ? { t: 1, b: 1 } : null;
+      for (var r = g.r1; r <= g.r2; r++) {
+        var row = { c1: g.c1, r1: r, c2: g.c2, r2: r };
+        if (r === g.r1) setStyle(row, { b: 1, bg: ts.head, fg: ts.fg, bd: bd });
+        else {
+          // 縞の行は薄い色なので、ダークモードでも読めるよう、濃い文字色も付ける
+          var banded = ts.band && (r - g.r1) % 2 === 0;
+          setStyle(row, { bg: banded ? ts.band : null, fg: banded ? "#1f2328" : null, bd: bd });
+        }
+      }
+      changed();
+      O.notify(t("「{name}」を付けました", { name: ts.label }));
+    }
+    function applyCellStyle(id) {
+      var cs = CSTYLES.filter(function (x) { return x.id === id; })[0], patch = {};
+      STYLE_KEYS.forEach(function (k) { patch[k] = null; });
+      if (cs) Object.keys(cs.st).forEach(function (k) { patch[k] = cs.st[k]; });
+      setStyle(range(), patch);
+      changed();
+    }
+    function styleMenu(kind, at) {
+      var items = [];
+      if (kind === "table") {
+        items.push({ value: "", label: t("スタイルなし（色と罫線をクリア）"), icon: "format_color_reset" });
+        TSTYLE_GROUPS.forEach(function (gr) {
+          items.push({ head: gr[1] });
+          TSTYLES.filter(function (x) { return x.group === gr[0]; }).forEach(function (x) { items.push({ value: x.id, label: x.label, color: x.head }); });
+        });
+      } else {
+        items.push({ value: "", label: t("標準（書式をクリア）"), icon: "format_clear" });
+        CSTYLE_GROUPS.forEach(function (gr) {
+          items.push({ head: gr[1] });
+          CSTYLES.filter(function (x) { return x.group === gr[0]; }).forEach(function (x) { items.push({ value: x.id, label: x.label, color: x.st.bg || x.st.fg || "#6b7280" }); });
+        });
+      }
+      return O.menu(at, items).then(function (v) { if (v === null || v === undefined) return; if (kind === "table") applyTableStyle(v); else applyCellStyle(v); });
+    }
     function toggleStyle(name) {
       if (readOnly()) return;
       var on = !styleAt(act.c, act.r)[name], p = {};
@@ -1892,6 +1974,10 @@
       if (ro) { O.notify(t("閲覧モードでは書きかえられません")); return; }
       // 関数を選ぶときは、書いている数式をそのままにする
       if (!/^(fnMenu|fncat:)/.test(cmd)) endEdit(true);
+      if (cmd === "tableStyleMenu") return styleMenu("table", at);
+      if (cmd === "cellStyleMenu") return styleMenu("cell", at);
+      if (cmd.indexOf("tstyle:") === 0) return applyTableStyle(cmd.slice(7));
+      if (cmd.indexOf("cstyle:") === 0) return applyCellStyle(cmd.slice(7));
       switch (cmd) {
         case "bold": return toggleStyle("b");
         case "italic": return toggleStyle("i");
@@ -2041,6 +2127,11 @@
           { stack: [{ icon: "delete", label: t("コメントを削除"), cmd: "noteDelete" }] }] },
         { label: t("セル"), items: [{ big: 1, icon: "add_box", label: t("挿入"), cmd: "insertMenu", drop: 1 }] }
       ] },
+      { tab: t("デザイン"), groups: [
+        { label: t("テーブルのスタイル"), items: [{ big: 1, icon: "table_chart", label: t("スタイル"), cmd: "tableStyleMenu", drop: 1 }]
+          .concat(["plain", "matcha", "ocean", "mikan", "navy", "washi"].map(function (id) { var x = TSTYLES.filter(function (y) { return y.id === id; })[0]; return { big: 1, icon: "table_rows", label: x.label, cmd: "tstyle:" + id }; })) },
+        { label: t("セルのスタイル"), items: [{ big: 1, icon: "style", label: t("セルのスタイル"), cmd: "cellStyleMenu", drop: 1 }] }
+      ] },
       { tab: t("数式"), groups: [
         { label: t("関数ライブラリ"), items: [{ big: 1, icon: "functions", label: t("関数の挿入"), cmd: "fnMenu" }, { big: 1, icon: "add_circle", label: t("オート SUM"), cmd: "autoSumMenu", drop: 1 }]
           .concat(FN_CATS.map(function (c) { return { big: 1, icon: c.icon, label: c.label, cmd: "fncat:" + c.id, drop: 1 }; })) },
@@ -2123,6 +2214,143 @@
     function hex6(c) { var m = /^#?([0-9a-f]{6})$/i.exec(c || ""); return m ? "FF" + m[1].toUpperCase() : null; }
     // Excel 2010 より後の関数は、ファイルの中では _xlfn. を付ける（付けないと Excel で #NAME? になる）。引数の区切りは , にそろえる
     var XLFN = /^(CONCAT|TEXTJOIN|IFS|MAXIFS|MINIFS|SWITCH|XLOOKUP|IFNA|XOR|DAYS|STDEV\.S|STDEV\.P|VAR\.S|VAR\.P|RANK\.EQ)$/;
+    // セルのコメント（comments.xml）。書き手ごとに <author> を作る
+    function commentsXml(s, noteKeys) {
+      var authors = [], aid = {};
+      noteKeys.forEach(function (k) { var a = s.notes[k].author || O.userName() || "SK Hub Office"; if (!(a in aid)) { aid[a] = authors.length; authors.push(a); } });
+      var cms = noteKeys.map(function (k) {
+        var nt = s.notes[k], a = nt.author || O.userName() || "SK Hub Office";
+        return '<comment ref="' + k + '" authorId="' + aid[a] + '"><text><r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><family val="2"/></rPr><t xml:space="preserve">' + X(nt.text) + "</t></r></text></comment>";
+      });
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>' +
+        authors.map(function (a) { return "<author>" + X(a) + "</author>"; }).join("") + "</authors><commentList>" + cms.join("") + "</commentList></comments>";
+    }
+    // ---------- Excel のグラフ（c:chartSpace）。グラフの範囲のセルを指すので、Excel でデータを直すとグラフも変わる ----------
+    //   種類は 縦棒・横棒・折れ線・面・円・散布図（アプリのグラフと同じ）。系列の色は chart.js と同じ 8 色
+    function absRef(c, r) { return ref(c, r).replace(/^([A-Z]+)(\d+)$/, function (m, a, b) { return "$" + a + "$" + b; }); }
+    // グラフの元の値。範囲の中に空の行があるときは、セルを指さずに値をそのまま書く（exact でない）
+    function chartModel(b, n, ch) {
+      var g = parseRange(ch.ref);
+      if (!g) return null;
+      var r2 = Math.min(g.r2, g.r1 + 500), c2 = Math.min(g.c2, g.c1 + 30), rows = [];
+      for (var r = g.r1; r <= r2; r++) {
+        var row = [];
+        for (var c = g.c1; c <= c2; c++) { var v = b.val(n, c, r); row.push(v === null || F.isErr(v) ? null : typeof v === "boolean" ? String(v) : v); }
+        rows.push(row);
+      }
+      var spec = Chart.fromRows(rows);
+      if (!spec.series.length) return null;
+      spec.type = ch.type; spec.title = ch.title;
+      return { g: g, spec: spec, exact: !spec.dropped };
+    }
+    function chartXml(m, ch, sheetName) {
+      var g = m.g, spec = m.spec, type = ch.type, pal = (Chart.colors || []).map(function (c) { return c.replace("#", "").toUpperCase(); });
+      var sn = "'" + String(sheetName).replace(/'/g, "''") + "'!", cats = spec.cats || [], head = !!spec.head;
+      var rowA = g.r1 + (head ? 1 : 0), rowB = rowA + cats.length - 1;
+      function rng(c) { return X(sn + absRef(c, rowA) + ":" + absRef(c, rowB)); }
+      function strPts(list) { return '<c:ptCount val="' + list.length + '"/>' + list.map(function (v, i) { return '<c:pt idx="' + i + '"><c:v>' + X(v) + "</c:v></c:pt>"; }).join(""); }
+      function numPts(list) { return '<c:ptCount val="' + list.length + '"/>' + list.map(function (v, i) { return typeof v === "number" && isFinite(v) ? '<c:pt idx="' + i + '"><c:v>' + v + "</c:v></c:pt>" : ""; }).join(""); }
+      function fill(c) { return '<a:solidFill><a:srgbClr val="' + c + '"/></a:solidFill>'; }
+      var isPie = type === "pie", isXY = type === "scatter", series = (isPie ? spec.series.slice(0, 1) : spec.series).slice(0, 8);
+      var numericCats = isXY && cats.length && cats.every(function (c) { return c !== "" && isFinite(+c); });
+      var catXml = !cats.length ? "" : "<c:cat>" + (m.exact && spec.catCol ? "<c:strRef><c:f>" + rng(g.c1) + "</c:f><c:strCache>" + strPts(cats) + "</c:strCache></c:strRef>" : "<c:strLit>" + strPts(cats) + "</c:strLit>") + "</c:cat>";
+      var xXml = !isXY ? "" : "<c:xVal>" + (numericCats ? (m.exact && spec.catCol ? "<c:numRef><c:f>" + rng(g.c1) + "</c:f><c:numCache><c:formatCode>General</c:formatCode>" + numPts(cats.map(Number)) + "</c:numCache></c:numRef>" : "<c:numLit><c:formatCode>General</c:formatCode>" + numPts(cats.map(Number)) + "</c:numLit>")
+        : "<c:numLit><c:formatCode>General</c:formatCode>" + numPts(cats.map(function (c, i) { return i + 1; })) + "</c:numLit>") + "</c:xVal>";
+      var sers = series.map(function (s, i) {
+        var col = pal[i % pal.length], c = g.c1 + s.col;
+        var tx = "<c:tx>" + (m.exact && head ? "<c:strRef><c:f>" + X(sn + absRef(c, g.r1)) + "</c:f><c:strCache>" + strPts([s.name]) + "</c:strCache></c:strRef>" : "<c:v>" + X(s.name) + "</c:v>") + "</c:tx>";
+        var vals = m.exact ? "<c:numRef><c:f>" + rng(c) + "</c:f><c:numCache><c:formatCode>General</c:formatCode>" + numPts(s.values) + "</c:numCache></c:numRef>" : "<c:numLit><c:formatCode>General</c:formatCode>" + numPts(s.values) + "</c:numLit>";
+        var sp, extra = "", tail = "";
+        if (type === "line" || isXY) {
+          sp = "<c:spPr><a:ln w=\"28575\" cap=\"rnd\">" + (isXY ? "<a:noFill/>" : fill(col)) + "<a:round/></a:ln></c:spPr>";
+          extra = '<c:marker><c:symbol val="circle"/><c:size val="6"/><c:spPr>' + fill(col) + "<a:ln><a:noFill/></a:ln></c:spPr></c:marker>";
+          tail = '<c:smooth val="0"/>';
+        } else sp = "<c:spPr>" + fill(col) + "</c:spPr>";
+        if (type === "col" || type === "bar") extra = '<c:invertIfNegative val="0"/>';
+        if (isPie) {
+          extra = cats.map(function (x, k) { return '<c:dPt><c:idx val="' + k + '"/><c:bubble3D val="0"/><c:spPr>' + fill(pal[k % pal.length]) + "</c:spPr></c:dPt>"; }).join("") +
+            '<c:dLbls><c:showLegendKey val="0"/><c:showVal val="0"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="1"/><c:showBubbleSize val="0"/><c:showLeaderLines val="1"/></c:dLbls>';
+        }
+        return '<c:ser><c:idx val="' + i + '"/><c:order val="' + i + '"/>' + tx + sp + extra + (isXY ? xXml + "<c:yVal>" + vals + "</c:yVal>" : catXml + "<c:val>" + vals + "</c:val>") + tail + "</c:ser>";
+      }).join("");
+      var ax = '<c:axId val="111111"/><c:axId val="222222"/>', plot;
+      if (type === "col" || type === "bar") plot = '<c:barChart><c:barDir val="' + (type === "bar" ? "bar" : "col") + '"/><c:grouping val="clustered"/><c:varyColors val="0"/>' + sers + '<c:gapWidth val="80"/>' + ax + "</c:barChart>";
+      else if (type === "line") plot = '<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>' + sers + '<c:marker val="1"/>' + ax + "</c:lineChart>";
+      else if (type === "area") plot = '<c:areaChart><c:grouping val="standard"/><c:varyColors val="0"/>' + sers + ax + "</c:areaChart>";
+      else if (isPie) plot = '<c:pieChart><c:varyColors val="1"/>' + sers + '<c:firstSliceAng val="0"/></c:pieChart>';
+      else plot = '<c:scatterChart><c:scatterStyle val="lineMarker"/><c:varyColors val="0"/>' + sers + ax + "</c:scatterChart>";
+      var grid = '<c:majorGridlines><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="E1E0D9"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>';
+      var axes = "";
+      if (!isPie) {
+        var horiz = type === "bar", common = '<c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/>';
+        if (isXY) {
+          axes = '<c:valAx><c:axId val="111111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/>' + common + '<c:crossAx val="222222"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>' +
+            '<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="l"/>' + grid + common + '<c:crossAx val="111111"/><c:crosses val="autoZero"/><c:crossBetween val="midCat"/></c:valAx>';
+        } else {
+          axes = '<c:catAx><c:axId val="111111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="' + (horiz ? "l" : "b") + '"/>' + common + '<c:crossAx val="222222"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>' +
+            '<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="' + (horiz ? "b" : "l") + '"/>' + grid + common + '<c:crossAx val="111111"/><c:crosses val="autoZero"/><c:crossBetween val="' + (type === "area" ? "midCat" : "between") + '"/></c:valAx>';
+        }
+      }
+      var title = ch.title ? '<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="1"/></a:pPr><a:r><a:rPr lang="ja-JP" sz="1400" b="1"/><a:t>' + X(ch.title) + "</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/></c:title>" : "";
+      var legend = spec.legend !== false && (isPie ? cats.length > 0 : series.length > 1) ? '<c:legend><c:legendPos val="b"/><c:overlay val="0"/></c:legend>' : "";
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+        '<c:roundedCorners val="0"/><c:chart>' + title + '<c:autoTitleDeleted val="' + (title ? 0 : 1) + '"/><c:plotArea><c:layout/>' + plot + axes + "</c:plotArea>" + legend + '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>' +
+        '<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="E1E0D9"/></a:solidFill></a:ln></c:spPr>' +
+        '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1000"/></a:pPr><a:endParaRPr lang="ja-JP"/></a:p></c:txPr></c:chartSpace>';
+    }
+    // グラフの場所（画面の px）を、セルの番号とずれ（EMU）にする。画面は、行の見出し（44px）・列の見出し（28px）の分だけ内側から始まる
+    function chartAnchor(s, ch) {
+      var x = Math.max(0, ch.x - HEADW), y = Math.max(0, ch.y - 28), c = 0, r = 1;
+      while (x >= (s.cw[c] || COLW) && c < 16383) { x -= s.cw[c] || COLW; c++; }
+      while (y >= (s.rh[r] || 28) && r < 1048575) { y -= s.rh[r] || 28; r++; }
+      return { col: c, colOff: Math.round(x * 9525), row: r - 1, rowOff: Math.round(y * 9525) };
+    }
+    // シート（<worksheet>）の直下に、<name r:id="rid"/> を入れる。before に並べた要素のどれかの前（なければいちばん後ろ）。同じ名前があれば先に消す。
+    //   文字列の検索ではなく XML として扱う（dataBar の cfRule の中にも extLst があるため）
+    function sheetChild(xml, name, rid, before) {
+      var RNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", doc = new DOMParser().parseFromString(xml, "application/xml"), root = doc.documentElement, at = null;
+      Array.prototype.slice.call(root.children).forEach(function (c) { if (c.localName === name) root.removeChild(c); });
+      Array.prototype.some.call(root.children, function (c) { if (before.indexOf(c.localName) >= 0) { at = c; return true; } });
+      var node = doc.createElementNS(root.namespaceURI, name);
+      node.setAttributeNS(RNS, "r:id", rid);
+      root.insertBefore(node, at);
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + new XMLSerializer().serializeToString(doc).replace(/^<\?xml[^>]*\?>\s*/, "");
+    }
+    // どのシートも使える形で、グラフ・ドローイング・つながりを足す。get(道) → 文字・set(道, 文字)。Content_Types に足す Override を返す
+    function nativeCharts(b, names, get, set) {
+      var overrides = [], k = 0, d = 0;
+      var R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", head = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+      data.sheets.forEach(function (s, n) {
+        var items = [];
+        (s.charts || []).forEach(function (ch) {
+          var m = chartModel(b, n, ch);
+          if (!m) return;
+          k++;
+          set("xl/charts/chart" + k + ".xml", chartXml(m, ch, names[n]));
+          overrides.push('<Override PartName="/xl/charts/chart' + k + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>');
+          items.push({ k: k, ch: ch });
+        });
+        if (!items.length) return;
+        d++;
+        set("xl/drawings/drawing" + d + ".xml", head + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="' + R + '" xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">' +
+          items.map(function (it, i) {
+            var a = chartAnchor(s, it.ch);
+            return '<xdr:oneCellAnchor><xdr:from><xdr:col>' + a.col + "</xdr:col><xdr:colOff>" + a.colOff + "</xdr:colOff><xdr:row>" + a.row + "</xdr:row><xdr:rowOff>" + a.rowOff + '</xdr:rowOff></xdr:from><xdr:ext cx="' + Math.round(it.ch.w * 9525) + '" cy="' + Math.round(it.ch.h * 9525) + '"/>' +
+              '<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="' + (i + 2) + '" name="Chart ' + (i + 1) + '"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>' +
+              '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart r:id="rId' + (i + 1) + '"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:oneCellAnchor>';
+          }).join("") + "</xdr:wsDr>");
+        set("xl/drawings/_rels/drawing" + d + ".xml.rels", head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          items.map(function (it, i) { return '<Relationship Id="rId' + (i + 1) + '" Type="' + R + '/chart" Target="../charts/chart' + it.k + '.xml"/>'; }).join("") + "</Relationships>");
+        overrides.push('<Override PartName="/xl/drawings/drawing' + d + '.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>');
+        // シートからドローイングへのつながり。ほかのつながり（コメントなど）の番号とぶつからない rId にする
+        var rp = "xl/worksheets/_rels/sheet" + (n + 1) + ".xml.rels", rels = get(rp) || head + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+        var next = 1; (rels.match(/Id="rId(\d+)"/g) || []).forEach(function (x) { next = Math.max(next, +x.match(/\d+/)[0] + 1); });
+        set(rp, rels.replace("</Relationships>", '<Relationship Id="rId' + next + '" Type="' + R + '/drawing" Target="../drawings/drawing' + d + '.xml"/></Relationships>'));
+        var sp = "xl/worksheets/sheet" + (n + 1) + ".xml";
+        set(sp, sheetChild(get(sp), "drawing", "rId" + next, ["legacyDrawing", "legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst"]));
+      });
+      return overrides;
+    }
     function fileFormula(src) { return F.tokenize(src).map(function (x) { return x.t === "fn" && XLFN.test(x.v) ? "_xlfn." + x.s : x.t === "," ? "," : x.s; }).join(""); }
     // Excel にあるエラーだけを書く（#CIRC! などは #VALUE! にする。開いたときに Excel が計算しなおす）
     function fileErr(e) { return /^#(NULL!|DIV\/0!|VALUE!|REF!|NAME\?|NUM!|N\/A)$/.test(e) ? e : "#VALUE!"; }
@@ -2239,14 +2467,7 @@
           .sort(function (a, b) { var p = parseRef(a), q = parseRef(b); return p.r - q.r || p.c - q.c; });
         var legacy = "";
         if (noteKeys.length) {
-          var authors = [], aid = {};
-          noteKeys.forEach(function (k) { var a = s.notes[k].author || O.userName() || "SK Hub Office"; if (!(a in aid)) { aid[a] = authors.length; authors.push(a); } });
-          var cms = noteKeys.map(function (k) {
-            var nt = s.notes[k], a = nt.author || O.userName() || "SK Hub Office";
-            return '<comment ref="' + k + '" authorId="' + aid[a] + '"><text><r><rPr><sz val="9"/><color indexed="81"/><rFont val="Tahoma"/><family val="2"/></rPr><t xml:space="preserve">' + X(nt.text) + "</t></r></text></comment>";
-          });
-          files["xl/comments" + (n + 1) + ".xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><authors>' +
-            authors.map(function (a) { return "<author>" + X(a) + "</author>"; }).join("") + "</authors><commentList>" + cms.join("") + "</commentList></comments>";
+          files["xl/comments" + (n + 1) + ".xml"] = commentsXml(s, noteKeys);
           var shapes = noteKeys.map(function (k, i) {
             var p = parseRef(k), row = p.r - 1, col = p.c;
             var anchor = col + ", 15, " + row + ", 2, " + Math.min(col + 2, 16383) + ", 15, " + Math.min(row + 4, 1048575) + ", 4";
@@ -2279,6 +2500,8 @@
         rels.push('<Relationship Id="rId' + (n + 1) + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet' + (n + 1) + '.xml"/>');
         ctypes.push('<Override PartName="/xl/worksheets/sheet' + (n + 1) + '.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>');
       });
+      // グラフは、Excel のグラフ（c:chart）として書く
+      ctypes = ctypes.concat(nativeCharts(b, data.sheets.map(function (s) { return s.name; }), function (p) { return files[p] || ""; }, function (p, v) { files[p] = v; }));
       var N = data.sheets.length;
       files["xl/styles.xml"] = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
         (numFmts.length ? '<numFmts count="' + numFmts.length + '">' + numFmts.join("") + "</numFmts>" : "") +
@@ -2309,22 +2532,8 @@
     function loadExcelJS() { return loadVendor("ExcelJS", "exceljs.min.js"); }
     function loadSheetJS() { return loadVendor("XLSX", "xlsx.full.min.js"); }
 
-    // ---------- ExcelJS で、グラフも入りの .xlsx を書き出す ----------
-    //   いまの軽い書き出し（xlsxFiles）は、条件付き書式・入力規則・コメントをそのまま書ける。
-    //   ExcelJS はグラフを画像として置けるので、グラフのあるファイルだけこちらを使う。
-    function chartPng(ch) {
-      return new Promise(function (resolve) {
-        var img = new Image();
-        img.onload = function () {
-          var cv = document.createElement("canvas");
-          cv.width = Math.max(1, Math.round(ch.w * 2)); cv.height = Math.max(1, Math.round(ch.h * 2));
-          var g = cv.getContext("2d"); g.scale(2, 2); g.drawImage(img, 0, 0, ch.w, ch.h);
-          resolve(cv.toDataURL("image/png").split(",")[1]);
-        };
-        img.onerror = function () { resolve(null); };
-        img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(chartSvg(ch, true));
-      });
-    }
+    // ---------- ExcelJS で .xlsx を書き出す（Excel のスタイルの書き方は ExcelJS まかせ） ----------
+    //   いまの軽い書き出し（xlsxFiles）と同じ中身。グラフは、どちらも nativeCharts で Excel のグラフとして足す。
     function excelSheetName(name, i, used) {
       var n = String(name || "Sheet" + (i + 1)).replace(/[\[\]:*?\/\\]/g, "_").replace(/^'+|'+$/g, "").slice(0, 31) || "Sheet" + (i + 1);
       var base = n, k = 2;
@@ -2384,15 +2593,14 @@
     }
     function excelJsFiles() {
       return loadExcelJS().then(function (ExcelJS) {
-        var wb = new ExcelJS.Workbook(), used = {}, images = [];
+        var wb = new ExcelJS.Workbook(), used = {}, names = [];
         wb.creator = O.userName() || "SK Hub Office";
         wb.created = new Date();
-        // グラフの画像を先に作る（シートを組み立てながらでもよいが、待つものをまとめる）
-        data.sheets.forEach(function (s) { (s.charts || []).forEach(function (ch) { images.push(chartPng(ch)); }); });
-        return Promise.all(images).then(function (pngs) {
-          var pi = 0;
+        // グラフは、書き出したあとに Excel のグラフ（nativeCharts）として足す
+        return Promise.resolve().then(function () {
           data.sheets.forEach(function (s, n) {
-            var ws = wb.addWorksheet(excelSheetName(s.name, n, used), { properties: { defaultRowHeight: 18 } });
+            names.push(excelSheetName(s.name, n, used));
+            var ws = wb.addWorksheet(names[n], { properties: { defaultRowHeight: 18 } });
             var b = Book(data), maxC = 0, maxR = 0;
             Object.keys(s.cells).forEach(function (k) {
               var p = parseRef(k); if (!p) return;
@@ -2401,7 +2609,7 @@
               if (typeof raw === "string" && raw.charAt(0) === "=" && raw.length > 1) {
                 v = b.val(n, p.c, p.r);
                 var result;
-                if (F.isErr(v)) result = { error: v.err };
+                if (F.isErr(v)) result = { error: fileErr(v.err) };
                 else if (v === null || v === undefined) result = "";
                 else if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") result = v;
                 else result = String(v);
@@ -2409,7 +2617,7 @@
               } else {
                 v = b.val(n, p.c, p.r);
                 if (v === null || v === undefined) v = "";
-                else if (F.isErr(v)) v = v.err;
+                else if (F.isErr(v)) v = fileErr(v.err);
                 else if (typeof v === "string" && raw.charAt(0) === "'") v = raw.slice(1);
                 else if (typeof v === "number" || typeof v === "boolean" || typeof v === "string") v = v;
                 else v = String(v);
@@ -2419,14 +2627,7 @@
             });
             // 行の高さ・列の幅（アプリの px を、Excel の pt・文字数に直す）
             Object.keys(s.cw || {}).forEach(function (c) { ws.getColumn(+c + 1).width = Math.max(1, Math.round((s.cw[c] - 5) / 7 * 100) / 100); });
-            Object.keys(s.rh || {}).forEach(function (r) { ws.getRow(+r).height = Math.max(1, Math.round(s.rh[r] * 4 / 3 * 100) / 100); });
-            // グラフ（画像を、その範囲の左上に置く）
-            (s.charts || []).forEach(function (ch) {
-              var b64 = pngs[pi++]; if (!b64) return;
-              var id = wb.addImage({ base64: b64, extension: "png" });
-              var g = parseRange(ch.ref) || { c1: 0, r1: 1 };
-              ws.addImage(id, { tl: { col: g.c1, row: Math.max(0, g.r1 - 1) }, ext: { width: Math.max(1, ch.w), height: Math.max(1, ch.h) }, editAs: "oneCell" });
-            });
+            Object.keys(s.rh || {}).forEach(function (r) { ws.getRow(+r).height = Math.max(1, Math.round(s.rh[r] * 0.75 * 100) / 100); });
             // コメント
             Object.keys(s.notes || {}).forEach(function (k) {
               var nt = s.notes[k], p = parseRef(k);
@@ -2448,7 +2649,7 @@
               if (rule.prompt || rule.promptTitle) { dv.showInputMessage = true; if (rule.promptTitle) dv.promptTitle = rule.promptTitle; if (rule.prompt) dv.prompt = rule.prompt; }
               if (rule.errTitle) dv.errorTitle = rule.errTitle;
               if (rule.err) dv.error = rule.err;
-              ws.getCell(rule.ref.split(":")[0]).dataValidation = dv;
+              ws.dataValidations.add(rangeText(g), dv);
             });
             // 条件付き書式
             (s.cf || []).forEach(function (rule) {
@@ -2471,7 +2672,7 @@
               if (model) ws.addConditionalFormatting({ ref: rangeText(g), rules: [model] });
             });
             // 結合・固定・フィルター・目盛線
-            (s.merges || []).forEach(function (m) { var g = parseRange(m); if (g) ws.mergeCells(g.c1 + 1, g.r1, g.c2 + 1, g.r2); });
+            (s.merges || []).forEach(function (m) { var g = parseRange(m); if (g) ws.mergeCells(g.r1, g.c1 + 1, g.r2, g.c2 + 1); });
             if (s.filter) {
               var fg = parseRange(ref(s.filter.c1, s.filter.r) + ":" + ref(s.filter.c2, Math.max(s.filter.r2 || 0, maxR)));
               if (fg) ws.autoFilter = rangeText(fg);
@@ -2485,8 +2686,33 @@
             ws.views = [view];
             ws.pageSetup.margins = { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 };
           });
-          return wb.xlsx.writeBuffer();
+          return wb.xlsx.writeBuffer().then(function (buf) { return excelJsFix(buf, names); });
         });
+      });
+    }
+    // ExcelJS の出力の直し。書き手が "Author" 固定になる・<legacyDrawing> が <drawing> より前に来る（Excel は順番がちがうと開けない）
+    function excelJsFix(buf, names) {
+      if (!Zip.canRead) return buf;
+      return Zip.read(new Blob([buf])).then(function (z) {
+        var out = { "[Content_Types].xml": z["[Content_Types].xml"] };
+        Object.keys(z).forEach(function (nm) { out[nm] = z[nm]; });
+        data.sheets.forEach(function (s, n) {
+          var sp = "xl/worksheets/sheet" + (n + 1) + ".xml", rp = "xl/worksheets/_rels/sheet" + (n + 1) + ".xml.rels";
+          if (!out[sp]) return;
+          // 順番は drawing → legacyDrawing → tableParts → extLst。グラフ（drawing）は、あとで legacyDrawing の前に足す
+          var xml = Zip.text(out[sp]), m = /<legacyDrawing\b[^>]*r:id="([^"]+)"/.exec(xml);
+          if (m) out[sp] = new TextEncoder().encode(sheetChild(xml, "legacyDrawing", m[1], ["legacyDrawingHF", "drawingHF", "picture", "oleObjects", "controls", "webPublishItems", "tableParts", "extLst"]));
+          var noteKeys = Object.keys(s.notes || {}).filter(function (k) { return s.notes[k] && s.notes[k].text && parseRef(k); });
+          var rel = /<Relationship\b[^>]*relationships\/comments"[^>]*>/.exec(Zip.text(out[rp])), tg = rel && /Target="([^"]+)"/.exec(rel[0]);
+          if (noteKeys.length && tg) {
+            var cp = resolvePart("xl/worksheets/", tg[1]);
+            if (out[cp]) out[cp] = new TextEncoder().encode(commentsXml(s, noteKeys));
+          }
+        });
+        // グラフ（Excel のグラフ）を足す。[Content_Types].xml にも足す
+        var enc = new TextEncoder(), ov = nativeCharts(Book(data), names, function (p) { return out[p] ? Zip.text(out[p]) : ""; }, function (p, v) { out[p] = enc.encode(v); });
+        if (ov.length) out["[Content_Types].xml"] = enc.encode(Zip.text(out["[Content_Types].xml"]).replace("</Types>", ov.join("") + "</Types>"));
+        return Zip.write(out);
       });
     }
     function exportAs(id) {
@@ -2528,6 +2754,79 @@
       if (type !== "date" || v === "" || !/^-?\d+(\.\d+)?$/.test(String(v).trim())) return v;
       var n = +v;
       return n >= 1 && n < 2958466 ? F.format(n, "yyyy/m/d").text : v;
+    }
+    // ---------- Excel のグラフ（c:chart）を読む ----------
+    //   このアプリのグラフは「データの範囲（ref）1 つ」で決まる（1 列目が項目・1 行目が系列の名前）。
+    //   Excel のグラフは系列ごとにセルを指すので、系列が同じ行の並んだ列で、項目の列がすぐ左にあるものだけ、範囲にして読む。
+    //   ほかのシートを指すもの・飛び飛びの列・値を直接書いたものは、読まずに飛ばす。種類は 縦棒・横棒・折れ線・面・円・散布図
+    var CHART_KIND = { barChart: "col", bar3DChart: "col", lineChart: "line", line3DChart: "line", areaChart: "area", area3DChart: "area", pieChart: "pie", pie3DChart: "pie", doughnutChart: "pie", scatterChart: "scatter" };
+    function dkid(node, name) { var k = node && node.firstElementChild; while (k) { if (k.localName === name) return k; k = k.nextElementSibling; } return null; }
+    function dkids(node, name) { var out = [], k = node && node.firstElementChild; while (k) { if (k.localName === name) out.push(k); k = k.nextElementSibling; } return out; }
+    // 'シート名'!$B$2:$B$3 → { sheet, g }（シート名がなければ sheet は ""）
+    function chartFormula(f) {
+      var m = /^(?:'((?:[^']|'')+)'|([^'!]+))!(.+)$/.exec(String(f || "").trim()), sheet = "", range = String(f || "").trim();
+      if (m) { sheet = (m[1] || m[2]).replace(/''/g, "'"); range = m[3]; }
+      var g = parseRange(range.replace(/\$/g, ""));
+      return g ? { sheet: sheet, g: g } : null;
+    }
+    function chartFromXml(cdoc, sheetName) {
+      var plot = kid(cdoc, "plotArea"), group = null, kind = null;
+      Array.prototype.some.call(plot ? plot.children : [], function (c) { if (CHART_KIND[c.localName]) { group = c; kind = CHART_KIND[c.localName]; return true; } });
+      if (!group) return null;
+      if (kind === "col" && (dkid(group, "barDir") || { getAttribute: function () { return ""; } }).getAttribute("val") === "bar") kind = "bar";
+      var sers = dkids(group, "ser"), cols = [], cat = null, first = null, headRow = null;
+      if (!sers.length) return null;
+      if (kind === "pie") sers = sers.slice(0, 1);
+      function refOf(wrap) { var f = wrap && kid(wrap, "f"); return f ? chartFormula(f.textContent) : null; }
+      for (var i = 0; i < sers.length; i++) {
+        var v = refOf(dkid(sers[i], kind === "scatter" ? "yVal" : "val")), nm = refOf(dkid(sers[i], "tx")), ct = refOf(dkid(sers[i], kind === "scatter" ? "xVal" : "cat"));
+        if (!v || v.g.c1 !== v.g.c2 || (v.sheet && v.sheet !== sheetName)) return null;
+        if (first && (v.g.r1 !== first.g.r1 || v.g.r2 !== first.g.r2 || v.g.c1 !== cols[cols.length - 1] + 1)) return null;
+        if (!first) first = v;
+        if (nm) {
+          if (nm.g.c1 !== v.g.c1 || nm.g.r1 !== nm.g.r2 || nm.g.r1 !== v.g.r1 - 1) return null;
+          headRow = v.g.r1 - 1;
+        } else if (headRow !== null) return null;
+        if (ct && !cat) cat = ct;
+        cols.push(v.g.c1);
+      }
+      var c1 = cols[0], r1 = headRow !== null ? headRow : first.g.r1;
+      if (cat) {
+        if (cat.g.c1 !== cat.g.c2 || cat.g.c1 !== c1 - 1 || cat.g.r1 !== first.g.r1 || cat.g.r2 !== first.g.r2 || (cat.sheet && cat.sheet !== sheetName)) return null;
+        c1 = c1 - 1;
+      }
+      var title = "", tEl = dkid(kid(cdoc, "chart"), "title"), atd = dkid(kid(cdoc, "chart"), "autoTitleDeleted");
+      if (tEl && !(atd && atd.getAttribute("val") === "1")) title = kids(tEl, "t").map(function (x) { return x.textContent; }).join("").trim();
+      return { type: kind, ref: rangeText({ c1: c1, r1: r1, c2: cols[cols.length - 1], r2: first.g.r2 }), title: title };
+    }
+    // シートの drawing にあるグラフを、s.charts に足す。dir は、シートのファイルのあるフォルダ（xl/ から）
+    function readXlsxCharts(z, wrel, dir, s) {
+      var RNS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships", drawPart = null;
+      if (wrel) kids(wrel, "Relationship").forEach(function (r) { if (/\/drawing$/.test(r.getAttribute("Type") || "")) drawPart = resolvePart("xl/" + dir, r.getAttribute("Target") || ""); });
+      var ddoc = drawPart && Zip.xml(z[drawPart]);
+      if (!ddoc) return;
+      var dd = drawPart.replace(/[^\/]+$/, ""), drel = Zip.xml(z[dd + "_rels/" + drawPart.slice(dd.length) + ".rels"]), parts = {};
+      if (drel) kids(drel, "Relationship").forEach(function (r) { parts[r.getAttribute("Id")] = resolvePart(dd, r.getAttribute("Target") || ""); });
+      function colX(c) { var x = HEADW; for (var i = 0; i < c; i++) x += s.cw[i] || COLW; return x; }
+      function rowY(r) { var y = 28; for (var i = 1; i <= r; i++) y += s.rh[i] || 28; return y; }
+      function pos(from) {
+        var n = function (k) { var e = kid(from, k); return e ? +e.textContent || 0 : 0; };
+        return { x: colX(n("col")) + n("colOff") / 9525, y: rowY(n("row")) + n("rowOff") / 9525 };
+      }
+      Array.prototype.forEach.call(ddoc.documentElement.children, function (a) {
+        if (!/Anchor$/.test(a.localName)) return;
+        var cEl = kids(a, "chart")[0], rid = cEl && (cEl.getAttributeNS(RNS, "id") || cEl.getAttribute("r:id")), part = rid && parts[rid], cdoc = part && Zip.xml(z[part]);
+        if (!cdoc) return;
+        var ch = chartFromXml(cdoc, s.name);
+        if (!ch) return;
+        var from = dkid(a, "from"), to = dkid(a, "to"), ext = dkid(a, "ext"), ap = dkid(a, "pos"), x, y, w, h;
+        if (from) { var p = pos(from); x = p.x; y = p.y; } else if (ap) { x = HEADW + (+ap.getAttribute("x") || 0) / 9525; y = 28 + (+ap.getAttribute("y") || 0) / 9525; } else return;
+        if (ext) { w = (+ext.getAttribute("cx") || 0) / 9525; h = (+ext.getAttribute("cy") || 0) / 9525; }
+        else if (to) { var q = pos(to); w = q.x - x; h = q.y - y; }
+        ch.id = "x" + Date.now().toString(36) + s.charts.length;
+        ch.x = Math.round(x); ch.y = Math.round(y); ch.w = Math.max(160, Math.min(1600, Math.round(w || 480))); ch.h = Math.max(120, Math.min(1200, Math.round(h || 300)));
+        s.charts.push(ch);
+      });
     }
     function readXlsx(file) {
       if (!Zip.canRead) return Promise.reject(new Error("no-inflate"));
@@ -2644,6 +2943,7 @@
               if (rf && parseRef(rf) && tx) s.notes[rf] = { text: tx, author: authors[aid] || "", ts: Date.now() };
             });
           }
+          readXlsxCharts(z, wrel, dir, s);
           var pane = kid(doc, "pane");
           if (pane && pane.getAttribute("state") === "frozen") s.freeze = { r: +pane.getAttribute("ySplit") || 0, c: +pane.getAttribute("xSplit") || 0 };
           var sv = kid(doc, "sheetView");
@@ -2880,7 +3180,7 @@
       afterPrint: afterPrint,
       exports: [
         { id: "xlsx", icon: "table_view", label: t("Excel ブック（.xlsx）"), desc: t("Microsoft Excel・LibreOffice・Google スプレッドシートで開けます") },
-        { id: "xlsx-charts", icon: "insert_chart", label: t("Excel ブック（グラフ付き .xlsx）"), desc: t("グラフを画像として入れます。少し時間がかかります") },
+        { id: "xlsx-charts", icon: "insert_chart", label: t("Excel ブック（グラフ付き .xlsx）"), desc: t("グラフを Excel のグラフとして入れます。少し時間がかかります") },
         { id: "csv", icon: "csv", label: "CSV（.csv）", desc: t("いまのシートの値を、カンマで区切った文字にします") }
       ],
       exportAs: exportAs,

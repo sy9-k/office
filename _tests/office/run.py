@@ -53,6 +53,39 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
+def make_third_party_xlsx():
+    """ほかのソフト（openpyxl）が作った、グラフ入りの .xlsx を input/ に置く（run.js が読みこむ。公開されない）。openpyxl が無ければ作らない"""
+    shutil.rmtree(HERE / "input", ignore_errors=True)
+    try:
+        from openpyxl import Workbook
+        from openpyxl.chart import BarChart, LineChart, Reference
+    except ImportError:
+        return
+    (HERE / "input").mkdir()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "データ"
+    for row in [("月", "売上", "費用"), ("1月", 120, 80), ("2月", 150, 90), ("3月", 170, 100)]:
+        ws.append(row)
+    bar = BarChart()
+    bar.type = "col"
+    bar.title = "月ごと"
+    bar.add_data(Reference(ws, min_col=2, max_col=3, min_row=1, max_row=4), titles_from_data=True)
+    bar.set_categories(Reference(ws, min_col=1, min_row=2, max_row=4))
+    bar.width, bar.height = 15, 7.5
+    ws.add_chart(bar, "E2")
+    line = LineChart()
+    line.title = "売上だけ"
+    line.add_data(Reference(ws, min_col=2, min_row=1, max_row=4), titles_from_data=True)
+    ws.add_chart(line, "E20")
+    # 項目の列が離れている（C 列のデータに A 列の項目）グラフは、範囲にできないので読まない
+    far = BarChart()
+    far.add_data(Reference(ws, min_col=3, min_row=1, max_row=4), titles_from_data=True)
+    far.set_categories(Reference(ws, min_col=1, min_row=2, max_row=4))
+    ws.add_chart(far, "N2")
+    wb.save(HERE / "input" / "third-party-chart.xlsx")
+
+
 def main(args):
     global OUT
     sys.stdout.reconfigure(encoding="utf-8")
@@ -63,7 +96,8 @@ def main(args):
         OUT = HERE / ("out-" + time.strftime("%Y%m%d-%H%M%S"))
         print(f"※ {HERE / 'out'} を消せないので、{OUT.name} に書き出します")
     OUT.mkdir()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(ROOT)))
+    make_third_party_xlsx()
+    server =ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(ROOT)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/_tests/office/?post=1" + (f"&only={only}" if only else "")
     exe = next((b for b in BROWSERS if b and Path(b).exists()), None)
@@ -86,6 +120,7 @@ def main(args):
             browser.kill()
         server.shutdown()
         shutil.rmtree(profile, ignore_errors=True)
+        shutil.rmtree(HERE / "input", ignore_errors=True)
 
     results = report.get("results", [])
     ng = [r for r in results if not r["ok"]]

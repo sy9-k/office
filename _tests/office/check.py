@@ -219,6 +219,14 @@ def check_xlsx_openpyxl(path, problems):
                     if c.comment is not None:
                         _ = c.comment.text, c.comment.author
             _ = list(ws.data_validations.dataValidation)
+        # グラフ: 書き出したグラフの数と、openpyxl が読めたグラフの数が同じで、どれも系列を持つ
+        wrote = sum(1 for n in zipfile.ZipFile(path).namelist() if re.match(r"xl/charts/chart\d+\.xml$", n))
+        charts = [ch for ws in wb.worksheets for ch in ws._charts]
+        if wrote != len(charts):
+            problems.append(f"グラフ {wrote} 個を書いたのに、読めたのは {len(charts)} 個です")
+        for ch in charts:
+            if not ch.series:
+                problems.append(f"{type(ch).__name__} に系列がありません")
     except Exception as e:  # noqa: BLE001  openpyxl が開けないこと自体を知らせる
         problems.append(f"openpyxl で開けません: {e!r}")
 
@@ -242,6 +250,12 @@ def check_file(path):
             problems.append(f"{name}: XML がこわれています: {e}")
     for name, root in parts.items():
         check_order(name, root, problems)
+    if path.name == "doc-design.docx":
+        # デザイン「和風」: 見出しの色・明朝・h2 の左の線・引用の線の色が styles.xml に入っている
+        styles = z.read("word/styles.xml").decode("utf-8")
+        for want in ['w:val="B3261E"', 'w:ascii="Yu Mincho"', "<w:pBdr><w:left", 'w:color="B3261E"', 'w:val="2A2118"']:
+            if want not in styles:
+                problems.append(f"styles.xml にデザインの {want} がありません")
     if path.suffix == ".xlsx":
         check_xlsx(z, parts, problems)
         check_xlsx_openpyxl(path, problems)
