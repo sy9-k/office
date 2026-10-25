@@ -207,6 +207,7 @@
   var Store = {
     EXT: EXT,
     supported: supported,
+    native: native, // デスクトップ版（フォルダは最初から決まっているので、選ぶ画面は出さない）
     appOf: appOf,
     state: function () { return state; },
     folderName: function () { return native ? (dir ? dirName(dir) : "") : folder ? folder.name : ""; },

@@ -272,7 +272,8 @@
     try { localStorage.setItem(UPDATE_KEY, String(Date.now())); } catch (e) { /* なし */ }
     return U.check().then(function (up) {
       if (!up) { if (manual) notify(t("最新の版です")); return; }
-      if (!manual && (!$("home") || $("home").hidden)) { notify(t("新しい版 {v} があります。「アカウント」の画面の「更新を確認」から更新できます", { v: up.version })); return; }
+      // 自動の確認では、確認の画面を出さない（作業中に割り込まない）。更新するかどうかは、「アカウント」の「更新を確認」から決めてもらう
+      if (!manual) { notify(t("新しい版 {v} があります。「アカウント」の「更新を確認」から更新できます", { v: up.version })); return; }
       return M3.confirm({
         title: t("新しい版 {v} があります", { v: up.version }),
         text: t("更新すると、このアプリをいったん閉じて、Doc・Sheet・Slide を新しい版に入れかえます。終わると、このアプリがもう一度開きます。ほかのアプリは、開いたままでも更新できます（閉じて開き直すと、新しい版になります）。"),
@@ -637,7 +638,7 @@
       (DESKTOP ? '<span class="rail__brand" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></span>"
         : '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></a>") +
       railItem("home", "home", t("ホーム")) +
-      (a ? railItem("new", "note_add", t("新規")) + railItem("open", "folder_open", t("開く")) : "") +
+      railItem("new", "note_add", t("新規")) + railItem("open", "folder_open", t("開く")) +
       (current ? railItem("info", "info", t("情報")) + railBtn("data-save-as", "save_as", t("コピーを保存")) + railItem("export", "ios_share", t("エクスポート")) +
         railBtn("data-print", "print", t("印刷")) + railBtn("data-close-file", "close", t("閉じる")) : "") +
       '<span class="rail__space"></span>' +
@@ -668,6 +669,7 @@
     var s = Store.state();
     if (Store.place() === "drive") return "";
     if (s === "ready") return "";
+    if (Store.native) return ""; // デスクトップ版は、ドキュメント\SK Hub Office に最初から保存する（フォルダを選ばせない）
     if (s === "unsupported") return showUnsupported ? '<div class="note-card">' + icon("info") + "<p>" + esc(t("このブラウザでは PC のフォルダに保存できないので、ブラウザの中に保存します。パソコンの Chrome か Edge なら、フォルダにファイルとして保存できます。")) + "</p></div>" : "";
     if (s === "needs-permission") return '<div class="folder-card">' + icon("folder_open") + '<div class="folder-card__text"><strong>' + esc(t("フォルダ「{name}」を使う許可が必要です", { name: Store.folderName() })) + "</strong><p>" + esc(t("ブラウザを開き直すと、もう一度許可を聞かれることがあります。")) + '</p></div><button type="button" class="m3-btn m3-state" data-allow>' + esc(t("許可する")) + "</button></div>";
     return '<div class="folder-card">' + icon("create_new_folder") + '<div class="folder-card__text"><strong>' + esc(t("保存するフォルダを選んでください")) + "</strong><p>" + esc(t("ファイルは、この PC のフォルダに 1 つずつ保存されます。最初に 1 回だけ、保存するフォルダを選んでください（例：ドキュメントの中に「SK Hub Office」フォルダを作って選ぶ）。")) + '</p></div><button type="button" class="m3-btn m3-state" data-pick>' + esc(t("フォルダを選ぶ")) + "</button></div>";
@@ -677,6 +679,24 @@
     var g = h < 5 ? t("こんばんは") : h < 11 ? t("おはようございます") : h < 18 ? t("こんにちは") : t("こんばんは");
     return n ? t("{greet}、{name} さん", { greet: g, name: n }) : g;
   }
+  // メインメニューの状態（アカウント・Google ドライブ・保存先・バージョン）。押すと、その画面へ（保存先は、開く・変える）
+  function hubStatus() {
+    var hint = accountHint(), ds = Store.driveState(), ver = DESKTOP && desktopVersion ? desktopVersion : VERSION;
+    var who = hint && (hint.name || hint.email) ? hint.name || hint.email : t("ログインしていません");
+    var drive = ds === "ready" ? driveWho() || t("つながっています") : ds === "needs-auth" ? t("つなぎなおしが必要です")
+      : ds === "off" ? t("つないでいません") : t("準備中です");
+    var dirPath = DESKTOP ? Store.folderPath() : "";
+    var folder = DESKTOP ? dirPath || t("未設定") : Store.state() === "ready" ? Store.folderName() : t("まだ選んでいません");
+    return '<section class="hub-status" aria-label="' + esc(t("状態")) + '">' +
+      '<button type="button" class="hub-status__item m3-state" data-view="account">' + icon("account_circle") + "<span><strong>" + esc(who) + "</strong><small>" + esc(t("アカウント")) + "</small></span></button>" +
+      '<button type="button" class="hub-status__item m3-state" data-view="account">' + icon("add_to_drive") + "<span><strong>" + esc(t("Google ドライブ")) + "</strong><small>" + esc(drive) + "</small></span></button>" +
+      '<div class="hub-status__item">' + icon("folder") + "<span><strong>" + esc(t("保存先")) + "</strong><small>" + esc(folder) + "</small></span>" +
+        '<span class="hub-status__acts">' + (dirPath ? '<button type="button" class="text-btn m3-state" data-open-folder>' + esc(t("開く")) + "</button>" : "") +
+        (Store.state() !== "unsupported" ? '<button type="button" class="text-btn m3-state" data-pick>' + esc(t("変える")) + "</button>" : "") + "</span></div>" +
+      '<div class="hub-status__item">' + icon("info") + "<span><strong>SK Hub Office</strong><small>" + esc(t("バージョン {v}", { v: ver })) + "</small></span>" +
+        (DESKTOP ? '<span class="hub-status__acts"><button type="button" class="text-btn m3-state" data-check-update>' + esc(t("更新を確認")) + "</button></span>" : "") + "</div>" +
+      "</section>";
+  }
   function viewHome() {
     var a = APPS[APP], h = a ? '<h1 class="start__h1">' + esc(greet()) + "</h1>" + banner(false) : "";
     if (!a) {
@@ -684,7 +704,7 @@
       var lead = { doc: t("文書を書く"), sheet: t("表で計算する"), slide: t("発表をつくる") };
       h += '<section class="hub-hero"><div class="hub-hero__logo">' + logo(null) + '</div><div class="hub-hero__text">' +
         '<p class="hub-hero__eyebrow">SK Hub Office</p><h1 class="start__h1">' + esc(greet()) + "</h1>" +
-        '<p class="hub-hero__lead">' + esc(t("書く・計算する・発表する。ぜんぶ、ブラウザで。")) + "</p></div></section>" + banner(false) +
+        '<p class="hub-hero__lead">' + esc(t("書く・計算する・発表する。ぜんぶ、ブラウザで。")) + "</p></div></section>" + hubStatus() + banner(false) +
         '<section class="start__sec"><h2 class="start__h2">' + esc(t("はじめる")) + '</h2><div class="apps apps--cards">' +
         ["doc", "sheet", "slide"].map(function (k) {
           var x = APPS[k];
@@ -702,7 +722,7 @@
     return '<h1 class="start__h1">' + esc(t("新規")) + "</h1>" + banner(false) + '<section class="start__sec">' +
       '<div class="chips" id="cat-chips" role="radiogroup" aria-label="' + esc(t("種類")) + '">' + CATS.map(function (c, i) {
         return '<button type="button" class="chip m3-state" role="radio" aria-checked="' + (i === 0) + '" data-cat="' + c[0] + '">' + icon("check") + esc(c[1]) + "</button>";
-      }).join("") + '</div><div class="tpl-grid" id="tpl-grid">' + (TEMPLATES[APP] || []).map(function (tp) { return tplCard(APP, tp); }).join("") + "</div></section>";
+      }).join("") + '</div><div class="tpl-grid" id="tpl-grid">' + tplGridItems() + "</div></section>";
   }
   function importLabel() {
     var x = App && App.imports ? App.imports.label : "";
@@ -723,7 +743,7 @@
         '<div class="open__places" role="list">' +
           '<button type="button" class="place' + (onDrive ? "" : " is-on") + ' m3-state" role="listitem" data-place="local" aria-pressed="' + !onDrive + '">' + icon(here[0]) + "<span><strong>" + esc(here[1]) + "</strong><small>" + esc(here[2]) + "</small></span></button>" +
           drive +
-          (Store.supported && !onDrive ? '<button type="button" class="place m3-state" role="listitem" data-pick>' + icon("drive_folder_upload") + "<span><strong>" + esc(t("フォルダを変更")) + "</strong><small>" + esc(t("ほかのフォルダに保存する")) + "</small></span></button>" : "") +
+          (Store.supported && !Store.native && !onDrive ? '<button type="button" class="place m3-state" role="listitem" data-pick>' + icon("drive_folder_upload") + "<span><strong>" + esc(t("フォルダを変更")) + "</strong><small>" + esc(t("ほかのフォルダに保存する")) + "</small></span></button>" : "") +
           '<button type="button" class="place m3-state" role="listitem" data-import>' + icon("upload_file") + "<span><strong>" + esc(t("参照")) + "</strong><small>" + esc(importLabel()) + "</small></span></button>" +
         '</div><div class="open__main"><div id="legacy"></div>' + fileSection(false) + "</div>" +
       "</div>";
@@ -815,7 +835,10 @@
       ["install_desktop", t("インストール"), t("アプリとしてインストール"), installText(), canInstall ? "data-install" : ""],
       ["help", t("サポート"), t("サポート"), t("使い方・よくある質問・お問い合わせ。"), 'href="https://support.sk-hub.jp/"' + blank],
       ["info", t("バージョン情報"), t("SK Hub Office のバージョン情報"), [t("SK Hub Office、ポリシー、サポートに関する詳しい情報。"), t("バージョン {v}（開発中）", { v: VERSION }), "SK Material（Material Design 3）"], "data-about"]
-    ];
+    ].filter(function (x) {
+      // デスクトップ版では、更新は「更新を確認」（製品情報）だけ。インストールは、ブラウザ（PWA）の話なので出さない
+      return !(DESKTOP && (x[0] === "system_update_alt" || x[0] === "install_desktop"));
+    });
     return '<h1 class="start__h1">' + esc(t("アカウント")) + "</h1>" +
       '<div class="acct">' +
         '<div class="acct__col">' +
@@ -884,7 +907,7 @@
           '<div class="tbs-seg" role="radiogroup" aria-label="' + esc(t("新しいファイルの保存先")) + '">' + [["local", "computer", t("この PC")], ["drive", "add_to_drive", t("Google ドライブ")]].map(function (x) {
             return '<button type="button" class="tbs-seg__btn m3-state" role="radio" aria-checked="' + (Store.place() === x[0]) + '" data-place="' + x[0] + '"><span class="msr tbs-seg__check" aria-hidden="true">check</span><span class="msr tbs-seg__icon" aria-hidden="true">' + x[1] + "</span>" + esc(x[2]) + "</button>";
           }).join("") + "</div>")) +
-        optRow("folder", t("この PC の保存先"), place, s === "unsupported" ? "" : '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-pick>' + esc(s === "none" ? t("フォルダを選ぶ") : t("変更")) + "</button>") +
+        optRow("folder", t("この PC の保存先"), place, s === "unsupported" || Store.native ? "" : '<button type="button" class="m3-btn m3-btn--tonal m3-state" data-pick>' + esc(s === "none" ? t("フォルダを選ぶ") : t("変更")) + "</button>") +
         optRow("save", t("自動保存"), t("変えたらすぐに保存します。オフにすると、保存のボタンか Ctrl+S で保存します"), '<input type="checkbox" class="tbs-switch" id="opt-autosave"' + (settings.autosave ? " checked" : "") + ' aria-label="' + esc(t("自動保存")) + '">') +
         '<div id="legacy"></div>' +
       "</section>" +
@@ -922,11 +945,19 @@
       '<p class="start__note">' + esc(Store.place() === "drive" ? t("新しいファイルは、Google ドライブの「SK Hub Office」フォルダに保存されます。SK Hub Office は開発中です。")
         : Store.state() === "unsupported" ? t("ファイルは、このブラウザの中に保存されます。SK Hub Office は開発中です。") : t("ファイルは、この PC の選んだフォルダに保存されます。SK Hub Office は開発中です。")) + "</p></section>";
   }
-  function tplCard(app, tp) {
-    var blank = tp.cat === "blank";
-    return '<button type="button" class="tpl m3-state" data-tpl="' + esc(tp.id) + '" data-cat="' + esc(tp.cat) + '">' +
+  // labelled: メインメニューの新規では、テンプレートにアプリの名前をつける（data-tpl-app で、どのアプリのテンプレートかを持つ）
+  function tplCard(app, tp, labelled) {
+    var blank = tp.cat === "blank", name = blank ? APPS[app].blank : t(tp.name);
+    return '<button type="button" class="tpl m3-state" data-tpl="' + esc(tp.id) + '" data-tpl-app="' + app + '" data-cat="' + esc(tp.cat) + '">' +
       thumb(copy(tp.data), blank) +
-      '<span class="tpl__name">' + esc(blank ? APPS[app].blank : t(tp.name)) + "</span></button>";
+      '<span class="tpl__name">' + esc(labelled ? APPS[app].name + "・" + name : name) + "</span></button>";
+  }
+  // 新規の一覧。メインメニューでは、3 つのアプリのテンプレートをぜんぶ並べる
+  function tplGridItems() {
+    var apps = APP === "hub" ? ["doc", "sheet", "slide"] : [APP];
+    return apps.reduce(function (acc, k) {
+      return acc.concat((TEMPLATES[k] || []).map(function (tp) { return tplCard(k, tp, APP === "hub"); }));
+    }, []).join("");
   }
   function filterTemplates(cat) {
     var chips = $("cat-chips");
@@ -938,16 +969,27 @@
     });
   }
   var listToken = 0;
+  // メインメニューの検索は、ファイルの名前に加えて中身（テキスト）からも探す。中身は 1 つずつ読むので、ファイルが多いと少し時間がかかる
+  function contentHits(all) {
+    var hits = {};
+    if (APP !== "hub" || !query) return Promise.resolve(hits);
+    var q = query.toLowerCase();
+    return Promise.all(all.map(function (f) {
+      return Store.get(f.id).then(function (full) {
+        if (full && JSON.stringify(full.data).toLowerCase().indexOf(q) >= 0) hits[f.id] = true;
+      }).catch(function () { /* 読めないファイルは、名前だけで探す */ });
+    })).then(function () { return hits; });
+  }
   function renderFileTable() {
     if (!$("files")) return Promise.resolve();
     var my = ++listToken;
-    return Store.list().then(function (all) {
+    return Store.list().then(function (all) { return contentHits(all).then(function (hits) {
       var box = $("files");
       if (my !== listToken || !box) return;
       all = all.filter(function (f) { return APP === "hub" ? !!APPS[f.app] : f.app === APP; });
       var list = all.filter(function (f) {
         if (view === "home" && fileTab === "pinned" && !isPinned(f.id)) return false;
-        return !query || f.name.toLowerCase().indexOf(query.toLowerCase()) >= 0;
+        return !query || hits[f.id] || f.name.toLowerCase().indexOf(query.toLowerCase()) >= 0;
       }).sort(function (a, b) { return (isPinned(b.id) ? 1 : 0) - (isPinned(a.id) ? 1 : 0) || b.updated - a.updated; });
       var empty = $("files-empty"), s = Store.state();
       if (Store.driveError && Store.driveError.message === "auth") renderStart();
@@ -970,7 +1012,7 @@
             '<button type="button" class="icon-btn m3-state" data-pin="' + esc(f.id) + '" aria-pressed="' + pin + '" aria-label="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '" title="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '">' + icon("push_pin") + "</button>" +
             '<button type="button" class="icon-btn m3-state" data-more="' + esc(f.id) + '" data-name="' + esc(f.name) + '" aria-label="' + esc(t("ファイルの操作")) + '">' + icon("more_horiz") + "</button></span></div>";
       }).join("");
-    }).catch(function (e) {
+    }); }).catch(function (e) {
       if (window.console) console.error(e);
       var box = $("files");
       if (box) box.innerHTML = '<div class="files-loading">' + esc(t("フォルダを読めませんでした。オプションから、フォルダを選び直してください。")) + "</div>";
@@ -991,12 +1033,18 @@
     history.pushState(null, "", "#f=" + encodeURIComponent(id));
     route();
   }
-  function createFrom(tplId) {
-    var tp = (TEMPLATES[APP] || []).filter(function (x) { return x.id === tplId; })[0];
+  // appKey: テンプレートのアプリ（メインメニューから作るとき）。省略すると、いまのアプリ
+  function createFrom(tplId, appKey) {
+    var k = appKey && APPS[appKey] ? appKey : APP;
+    var tp = (TEMPLATES[k] || []).filter(function (x) { return x.id === tplId; })[0];
     if (!tp) return;
     ensureFolder().then(function (ok) {
       if (!ok) return;
-      return Store.create(APP, tp.cat === "blank" ? APPS[APP].untitled : t(tp.name), tp.id, copy(tp.data)).then(function (f) { openFile(f.id); });
+      return Store.create(k, tp.cat === "blank" ? APPS[k].untitled : t(tp.name), tp.id, copy(tp.data)).then(function (f) {
+        // メインメニューからは、作ったファイルを、そのアプリのウィンドウで開く（デスクトップ版は、別のウィンドウ）
+        if (APP === "hub" && DESKTOP) return OfficePlatform.openWindow(k, f.id);
+        openFile(f.id, k);
+      });
     }).catch(failed);
   }
   function fileActions(id, name, at) {
@@ -1589,7 +1637,8 @@
   document.addEventListener("click", function (e) {
     var el;
     if ((el = e.target.closest("[data-todo]"))) return notify(t("「{name}」は、まだ使えません", { name: el.getAttribute("data-todo") }));
-    if ((el = e.target.closest("[data-tpl]"))) return createFrom(el.getAttribute("data-tpl"));
+    if ((el = e.target.closest("[data-tpl]"))) return createFrom(el.getAttribute("data-tpl"), el.getAttribute("data-tpl-app"));
+    if (e.target.closest("[data-open-folder]")) { OfficePlatform.openFolder(Store.folderPath()).catch(failed); return; }
     if ((el = e.target.closest("[data-open]"))) return openFile(el.getAttribute("data-open"), el.getAttribute("data-open-app"));
     if ((el = e.target.closest("[data-more]"))) return fileActions(el.getAttribute("data-more"), el.getAttribute("data-name"), el);
     if ((el = e.target.closest("[data-pin]"))) {
@@ -1686,7 +1735,7 @@
     if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
     var k = e.key.toLowerCase();
     if (e.shiftKey && k === "n") { e.preventDefault(); OfficePlatform.openWindow(APPS[APP] ? APP : "hub"); }
-    else if (!e.shiftKey && k === "o" && APPS[APP] && !document.querySelector(".tbs-dialog-scrim, .present")) { e.preventDefault(); openWithDialog(); }
+    else if (!e.shiftKey && k === "o" && (APPS[APP] || APP === "hub") && !document.querySelector(".tbs-dialog-scrim, .present")) { e.preventDefault(); openWithDialog(); }
   });
 
   // デスクトップ版: Explorer からウィンドウにファイル（.skdoc など）をドロップして開く（コピーを作らず、そのファイルを直接開く）

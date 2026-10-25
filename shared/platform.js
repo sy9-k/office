@@ -38,6 +38,8 @@
     externalLogin: function (urlTemplate, timeoutSecs, inApp) { return Platform.invoke("external_login", { urlTemplate: urlTemplate, timeoutSecs: timeoutSecs || 600, inApp: !!inApp }); },
     cancelLogin: function () { return Platform.invoke("external_login_cancel"); },
     openExternal: function (url) { return Platform.invoke("open_external", { url: url }); },
+    // 保存先のフォルダを、エクスプローラーで開く（デスクトップ版）
+    openFolder: function (dir) { return Platform.invoke("open_folder", { dir: dir }); },
     // Google のトークン（リフレッシュトークンは Rust が OS の保管庫に入れ、ここには来ない）
     googleToken: function (params, useStoredRefresh) { return Platform.invoke("google_token", { params: params, useStoredRefresh: !!useStoredRefresh }); },
     googleHasRefresh: function () { return Platform.invoke("google_has_refresh"); },
