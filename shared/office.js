@@ -49,6 +49,7 @@
 
   // ---------- 保存（/office/shared/store.js）と設定 ----------
   var Store = window.OfficeStore;
+  var DESKTOP = !!(window.OfficePlatform && OfficePlatform.isDesktop); // デスクトップ版（shared/platform.js）
   var VERSION = "0.3";
   // SK Hub Office の設定（このブラウザの localStorage の sk_office_settings）
   //   { theme: "auto|light|dark", motion: "auto|reduce", autosave: true|false, user: "名前", pinned: [ファイルの ID] }
@@ -468,6 +469,12 @@
     ["BIZ UDPゴシック", '"BIZ UDPGothic", "Yu Gothic", sans-serif'], ["游明朝", '"Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif'], ["BIZ UD明朝", '"BIZ UDMincho", "Yu Mincho", serif'],
     ["Arial", "Arial, Helvetica, sans-serif"], ["Times New Roman", '"Times New Roman", Times, serif'], ["Georgia", "Georgia, serif"], ["Consolas", "Consolas, Menlo, monospace"]
   ];
+  // デスクトップ版は、PC に入っているフォントすべてを一覧の後ろに足す（Web 版は上の一覧だけ）
+  if (window.OfficePlatform && OfficePlatform.features.systemFonts) OfficePlatform.systemFonts().then(function (names) {
+    var have = {};
+    O.fonts.forEach(function (f) { have[f[0]] = 1; });
+    names.forEach(function (n) { if (!have[n]) O.fonts.push([n, '"' + String(n).replace(/["\\;{}<>]/g, "") + '", sans-serif']); });
+  }).catch(function () { /* 上の一覧だけで使える */ });
   O.fontCss = function (name) {
     for (var i = 0; i < O.fonts.length; i++) if (O.fonts[i][0] === name) return O.fonts[i][1];
     return '"' + String(name).replace(/["\\;{}<>]/g, "") + '", sans-serif';
@@ -675,7 +682,7 @@
   // エクスポート（ほかの形式で書き出す）
   function viewExport() {
     var list = [{ id: "sk", icon: "save_as", label: t("SK Hub Office のファイル"), desc: t("{ext} のファイルとして、好きな場所に保存します", { ext: Store.EXT[APP] }) },
-      { id: "pdf", icon: "picture_as_pdf", label: "PDF", desc: t("印刷の画面で「PDF に保存」を選びます") }].concat(App.exports || []);
+      { id: "pdf", icon: "picture_as_pdf", label: "PDF", desc: DESKTOP ? t("保存する場所を選ぶだけで、PDF にします") : t("印刷の画面で「PDF に保存」を選びます") }].concat(App.exports || []);
     return '<h1 class="start__h1">' + esc(t("エクスポート")) + "</h1>" +
       '<div class="export-grid">' + list.map(function (x) {
         return '<button type="button" class="export-card m3-state" data-export="' + esc(x.id) + '">' + icon(x.icon) + "<span><strong>" + esc(x.label) + "</strong><small>" + esc(x.desc || "") + "</small></span></button>";
@@ -686,7 +693,10 @@
     if (!current) return;
     flush();
     if (id === "sk") { Store.exportFile(current).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(failed); return; }
-    if (id === "pdf") { backToEditor(); setTimeout(doPrint, 300); return; }
+    if (id === "pdf") {
+      if (DESKTOP) { savePdf(); return; }
+      backToEditor(); setTimeout(doPrint, 300); return;
+    }
     Promise.resolve(App.exportAs(id)).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(function (e) {
       if (window.console) console.error(e);
       notify(t("書き出せませんでした"));
@@ -897,15 +907,17 @@
   }
   function fileActions(id, name, at) {
     menu(at, [
-      { value: "open", label: t("開く"), icon: "open_in_new" },
+      { value: "open", label: t("開く"), icon: "open_in_new" }]
+      .concat(DESKTOP && !Store.isOutside(id) ? [{ value: "window", label: t("新しいウィンドウで開く"), icon: "open_in_browser" }] : []).concat([
       { value: "rename", label: t("名前を変更"), icon: "edit" },
       { value: "copy", label: t("コピーを作る"), icon: "content_copy" },
       { value: "export", label: t("ファイルとして書き出す"), icon: "download" },
       { sep: 1 },
       { value: "delete", label: t("削除"), icon: "delete" }
-    ]).then(function (v) {
+    ])).then(function (v) {
       if (!v) return;
       if (v === "open") return Store.get(id).then(function (f) { if (f) openFile(f.id, f.app); });
+      if (v === "window") return Store.get(id).then(function (f) { if (f) return OfficePlatform.openWindow(f.app, f.id); });
       if (v === "rename") return Store.get(id).then(function (f) { if (f) renameFile(f, renderFileTable); });
       if (v === "copy") return Store.get(id).then(function (f) {
         return f && Store.copy(f, t("{name} のコピー", { name: f.name })).then(function () { renderFileTable(); notify(t("コピーを作りました")); });
@@ -1274,6 +1286,26 @@
   window.addEventListener("beforeprint", beforePrint);
   window.addEventListener("afterprint", afterPrint);
   function doPrint() { if ($("editor").hidden) backToEditor(); window.print(); }
+  // デスクトップ版: 印刷のダイアログなしで、PDF に書き出す（保存する場所を選ぶだけ）。印刷と同じ見た目（beforePrint で切りかえたもの）を使う
+  function savePdf() {
+    var P = window.OfficePlatform;
+    if (!current || !P) return;
+    if ($("editor").hidden) backToEditor();
+    return P.pickPdfPath(current.name).then(function (path) {
+      if (!path) return;
+      notify(t("PDF を書き出しています…"));
+      beforePrint();
+      var css = printStyle ? printStyle.textContent : "";
+      // 印刷用の見た目に変わるのを待ってから書き出す
+      return new Promise(function (r) { setTimeout(r, 300); }).then(function () { return P.printPdf(path, css); }).then(function () {
+        afterPrint();
+        notify(t("PDF に書き出しました"));
+      }, function (e) { afterPrint(); throw e; });
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      notify(t("PDF に書き出せませんでした"));
+    });
+  }
 
   function showKeys() {
     var list = [["Ctrl+S", t("保存")], ["Ctrl+Z", t("元に戻す")], ["Ctrl+Y", t("やり直し")], ["Ctrl+C / X / V", t("コピー・切り取り・貼り付け")],
@@ -1523,6 +1555,10 @@
     if (id === "acct-theme") { settings.theme = e.target.value; saveSettings(); applySettings(); }
     if (id === "opt-motion") { settings.motion = e.target.checked ? "reduce" : "auto"; saveSettings(); applySettings(); }
     if (id === "opt-autosave") { settings.autosave = e.target.checked; saveSettings(); if (settings.autosave && dirty) saveNow(); notify(settings.autosave ? t("自動保存をオンにしました") : t("自動保存をオフにしました")); }
+  });
+  // デスクトップ版: Ctrl+Shift+N で、新しいウィンドウ（いまと同じアプリ）
+  if (DESKTOP) document.addEventListener("keydown", function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "n") { e.preventDefault(); OfficePlatform.openWindow(APPS[APP] ? APP : "hub"); }
   });
   document.addEventListener("keydown", function (e) {
     if (!current || !$("editor") || $("editor").hidden || document.querySelector(".tbs-dialog-scrim, .present")) return;

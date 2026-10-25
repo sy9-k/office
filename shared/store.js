@@ -353,10 +353,8 @@
       handles[id] = { native: true, path: path, name: name };
       return Promise.resolve(id);
     },
-    // 起動の引数で渡されたファイル（デスクトップ版）のパスの一覧
-    launchFiles: function () {
-      return Platform && Platform.features.launchFiles ? nativeRun("launch_files").catch(function () { return []; }) : Promise.resolve([]);
-    },
+    // 起動で渡されたファイル（デスクトップ版。ダブルクリックしたもの）のパスの一覧
+    launchFiles: function () { return Promise.resolve(Platform && Platform.features.launchFiles ? Platform.openArgs : []); },
     isOutside: isHandleId,
 
     // 版の履歴（前の版を、このブラウザの IndexedDB の kv に「v:ファイルの ID」で 20 個まで残す。ファイルそのものには入れない）

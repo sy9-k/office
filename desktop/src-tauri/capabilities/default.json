@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "メインウィンドウに許す操作",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "すべてのウィンドウに許す操作（ウィンドウのタイトルを画面の題名に合わせる）",
+  "windows": ["*"],
+  "permissions": ["core:default", "core:window:allow-set-title"]
 }

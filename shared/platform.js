@@ -13,13 +13,50 @@
     // デスクトップ版にだけある機能（Web 版との違い。about の比較表と合わせる）
     features: {
       nativeFs: desktop,      // フォルダ・ファイルをパスで直接読み書きする（毎回の許可なし。Safari・Firefox 相当の環境でも同じ）
-      launchFiles: desktop    // 起動したときの引数のファイル（.skdoc などのダブルクリック）を受け取る
+      launchFiles: desktop,   // .skdoc などをダブルクリックして起動する（起動したウィンドウに渡るファイルは openArgs）
+      multiWindow: desktop,   // 別のウィンドウで開く（openWindow）
+      systemFonts: desktop,   // PC に入っているフォントすべて（systemFonts）
+      silentPdf: desktop      // 印刷のダイアログなしで PDF に書き出す（savePdf）
     },
+    // 起動で渡されたファイルのパス（ダブルクリックしたとき。Rust がウィンドウを開くときに入れる）
+    openArgs: desktop && Array.isArray(window.__SK_OPEN__) ? window.__SK_OPEN__ : [],
     invoke: function (cmd, args) {
       if (!desktop) return Promise.reject(new Error("not-desktop"));
       return T.core.invoke(cmd, args || {});
+    },
+    // 別のウィンドウで開く。app: "doc"・"sheet"・"slide"・"hub"。fileId があれば、そのファイルを開く
+    openWindow: function (app, fileId) {
+      var page = app === "doc" || app === "sheet" || app === "slide" ? app + "/index.html" : "index.html";
+      return Platform.invoke("new_window", { page: page, hash: fileId ? "f=" + encodeURIComponent(fileId) : null });
+    },
+    // PC に入っているフォントの名前（五十音と ABC 順）
+    systemFonts: function () { return Platform.invoke("system_fonts"); },
+    // 印刷用の見た目にしたあとの画面を、PDF にして保存する。css は @page のある印刷用の CSS（用紙の大きさを読む）
+    //   保存する場所を選んでもらう。やめたら false
+    pickPdfPath: function (name) { return Platform.invoke("pick_pdf_path", { name: name }); },
+    printPdf: function (path, css) {
+      var s = Platform.pageSize(css);
+      return Platform.invoke("print_pdf", { path: path, widthMm: s.w, heightMm: s.h });
+    },
+    // @page { size: … } から用紙の大きさ（mm）を読む。"A4 landscape"・"letter"・"254mm 142.9mm" など。読めないときは A4 縦
+    pageSize: function (css) {
+      var NAMED = { a3: [297, 420], a4: [210, 297], a5: [148, 210], b5: [182, 257], letter: [215.9, 279.4], legal: [215.9, 355.6] };
+      var m = /@page\s*\{[^}]*?size\s*:\s*([^;}]+)/i.exec(css || "");
+      var v = m ? m[1].trim().toLowerCase() : "", land = /landscape/.test(v), dims = null, mm = /([\d.]+)mm\s+([\d.]+)mm/.exec(v);
+      if (mm) dims = [parseFloat(mm[1]), parseFloat(mm[2])];
+      else for (var k in NAMED) if (new RegExp("\\b" + k + "\\b").test(v)) { dims = NAMED[k]; break; }
+      dims = dims || NAMED.a4;
+      return land && dims[0] < dims[1] ? { w: dims[1], h: dims[0] } : { w: dims[0], h: dims[1] };
     }
   };
   window.OfficePlatform = Platform;
   document.documentElement.setAttribute("data-platform", Platform.kind);
+
+  // ウィンドウのタイトルを、画面の題名（ファイル名 — Doc | SK Hub Office）に合わせる
+  if (desktop && T.window && T.window.getCurrentWindow) {
+    var win = T.window.getCurrentWindow(), last = "";
+    var sync = function () { if (document.title && document.title !== last) { last = document.title; win.setTitle(last).catch(function () {}); } };
+    new MutationObserver(sync).observe(document.querySelector("title") || document.documentElement, { childList: true, subtree: true, characterData: true });
+    document.addEventListener("DOMContentLoaded", sync);
+  }
 })();

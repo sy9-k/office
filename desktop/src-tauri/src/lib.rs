@@ -6,6 +6,7 @@
 //   ・書き込みは、同じフォルダの一時ファイルに書いてから置きかえる（途中で止まっても、前のファイルが壊れない）
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
@@ -165,11 +166,27 @@ async fn fs_write_path(path: String, text: String) -> Result<(), String> {
     write_atomic(&abs_office_path(&path)?, &text)
 }
 
-// 起動したときの引数にある、SK Hub Office のファイル（エクスプローラーでダブルクリックして開いたもの）
-#[tauri::command]
-fn launch_files() -> Vec<String> {
-    std::env::args()
-        .skip(1)
+// ---------- ウィンドウ ----------
+// アプリ（Doc・Sheet・Slide・入り口）ごとに別のウィンドウで開く。起動の引数のファイル（ダブルクリック）も、ここで開く
+
+static WINDOW_SEQ: AtomicUsize = AtomicUsize::new(0);
+
+fn page_of_file(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".skdoc") {
+        "doc/index.html"
+    } else if lower.ends_with(".sksheet") {
+        "sheet/index.html"
+    } else if lower.ends_with(".skslide") {
+        "slide/index.html"
+    } else {
+        "index.html"
+    }
+}
+
+// 引数から、実在する SK Hub Office のファイルのパスだけを取り出す
+fn office_files<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
+    args.into_iter()
         .filter(|a| {
             let p = Path::new(a);
             p.is_absolute() && p.is_file() && p.file_name().and_then(|n| n.to_str()).map(has_ext).unwrap_or(false)
@@ -177,11 +194,166 @@ fn launch_files() -> Vec<String> {
         .collect()
 }
 
+// page: 開くページ（許可したものだけ）。hash: 開くファイルの指定（"f=…"）。open: フォルダの外のファイルのパス
+fn open_window(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Option<&str>) -> Result<(), String> {
+    const PAGES: [&str; 4] = ["index.html", "doc/index.html", "sheet/index.html", "slide/index.html"];
+    if !PAGES.contains(&page) {
+        return Err(format!("bad-page: {page}"));
+    }
+    let label = format!("w{}", WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
+    let script = format!(
+        "(function(){{try{{var h={};if(h&&!location.hash)history.replaceState(null,'','#'+h);window.__SK_OPEN__={};}}catch(e){{}}}})();",
+        serde_json::to_string(&hash).map_err(|e| e.to_string())?,
+        serde_json::to_string(&open.map(|o| vec![o]).unwrap_or_default()).map_err(|e| e.to_string())?,
+    );
+    tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(page.into()))
+        .title("SK Hub Office")
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(800.0, 560.0)
+        .initialization_script(script)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn open_files_or_hub(app: &tauri::AppHandle, files: Vec<String>) {
+    if files.is_empty() {
+        // すでに開いているウィンドウがあれば前に出し、なければ入り口を開く
+        if let Some(w) = app.webview_windows().values().next() {
+            let _ = w.unminimize();
+            let _ = w.set_focus();
+        } else {
+            let _ = open_window(app, "index.html", None, None);
+        }
+        return;
+    }
+    for f in files {
+        let _ = open_window(app, page_of_file(&f), None, Some(&f));
+    }
+}
+
+#[tauri::command]
+async fn new_window(app: tauri::AppHandle, page: String, hash: Option<String>) -> Result<(), String> {
+    open_window(&app, &page, hash.as_deref(), None)
+}
+
+// ---------- システムフォント ----------
+// PC に入っているフォントの名前の一覧（重複なし・五十音と ABC 順）
+#[tauri::command]
+async fn system_fonts() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        let names: std::collections::BTreeSet<String> = db
+            .faces()
+            .filter_map(|f| f.families.first().map(|(n, _)| n.clone()))
+            .filter(|n| !n.starts_with('.') && !n.starts_with('@'))
+            .collect();
+        names.into_iter().collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+// ---------- PDF（印刷のダイアログなしで書き出す） ----------
+// 保存する場所を選んでもらう（やめたら null）
+#[tauri::command]
+async fn pick_pdf_path(app: tauri::AppHandle, name: String) -> Result<Option<String>, String> {
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("PDF", &["pdf"])
+        .set_file_name(format!("{}.pdf", name.trim_end_matches(".pdf")))
+        .blocking_save_file();
+    match file {
+        Some(p) => Ok(Some(p.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned())),
+        None => Ok(None),
+    }
+}
+
+// 呼んだウィンドウの、いまの画面（印刷用の見た目に切りかえてあるもの）を PDF にする。用紙の大きさは mm
+#[cfg(windows)]
+#[tauri::command]
+async fn print_pdf(window: tauri::WebviewWindow, path: String, width_mm: f64, height_mm: f64) -> Result<(), String> {
+    use webview2_com::Microsoft::Web::WebView2::Win32::{
+        ICoreWebView2_2, ICoreWebView2_7, ICoreWebView2Environment6, COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT,
+    };
+    use windows::core::{Interface, HSTRING};
+
+    if !path.to_lowercase().ends_with(".pdf") {
+        return Err("bad-path".into());
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
+    window
+        .with_webview(move |wv| {
+            let run = || -> Result<(), String> {
+                unsafe {
+                    let core = wv.controller().CoreWebView2().map_err(|e| e.to_string())?;
+                    let core2: ICoreWebView2_2 = core.cast().map_err(|e| e.to_string())?;
+                    let core7: ICoreWebView2_7 = core.cast().map_err(|e| e.to_string())?;
+                    let env: ICoreWebView2Environment6 = core2
+                        .Environment()
+                        .map_err(|e| e.to_string())?
+                        .cast()
+                        .map_err(|e| e.to_string())?;
+                    let settings = env.CreatePrintSettings().map_err(|e| e.to_string())?;
+                    let _ = settings.SetOrientation(COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT);
+                    let _ = settings.SetPageWidth(width_mm / 25.4);
+                    let _ = settings.SetPageHeight(height_mm / 25.4);
+                    let _ = settings.SetMarginTop(0.0);
+                    let _ = settings.SetMarginBottom(0.0);
+                    let _ = settings.SetMarginLeft(0.0);
+                    let _ = settings.SetMarginRight(0.0);
+                    let _ = settings.SetShouldPrintBackgrounds(true);
+                    let _ = settings.SetShouldPrintHeaderAndFooter(false);
+                    let path = HSTRING::from(path);
+                    webview2_com::PrintToPdfCompletedHandler::wait_for_async_operation(
+                        Box::new(move |handler| {
+                            core7.PrintToPdf(&path, &settings, &handler).map_err(webview2_com::Error::WindowsError)
+                        }),
+                        Box::new(|error_code, ok| {
+                            error_code?;
+                            if ok {
+                                Ok(())
+                            } else {
+                                Err(windows::core::Error::from(windows::Win32::Foundation::E_FAIL))
+                            }
+                        }),
+                    )
+                    .map_err(|e| format!("{e:?}"))
+                }
+            };
+            let _ = tx.send(run());
+        })
+        .map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || rx.recv().map_err(|e| e.to_string())?)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+async fn print_pdf(_window: tauri::WebviewWindow, _path: String, _width_mm: f64, _height_mm: f64) -> Result<(), String> {
+    Err("unsupported".into())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // すでに起動しているときに、また起動された（別のファイルをダブルクリックした）ら、いまの SK Hub Office で開く
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            open_files_or_hub(app, office_files(argv.into_iter().skip(1)));
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            open_files_or_hub(app.handle(), office_files(std::env::args().skip(1)));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
+            new_window,
+            system_fonts,
+            pick_pdf_path,
+            print_pdf,
             app_info,
             default_dir,
             pick_folder,
@@ -193,7 +365,6 @@ pub fn run() {
             fs_remove,
             fs_read_path,
             fs_write_path,
-            launch_files,
         ])
         .run(tauri::generate_context!())
         .expect("SK Hub Office の起動に失敗しました");
