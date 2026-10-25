@@ -13,6 +13,9 @@
 //   ・Google ドライブ（drive.js の window.OfficeDrive）にも保存できる。ファイルの ID が「g:」で始まるものは Google ドライブのファイル。
 //     新しく作るファイルをどこに入れるかは place()（"local": この PC のフォルダかブラウザの中・"drive": Google ドライブ）。setPlace() で変える
 //     list() は両方のファイルを返す（どちらのファイルかは place）。get・save・rename・remove は ID で、どちらに行くかを決める
+//   ・デスクトップ版（platform.js の nativeFs）は、フォルダの読み書きを Rust の命令（desktop/src-tauri/src/lib.rs）で行う
+//       許可の聞き直しはなく、最初から ドキュメント\SK Hub Office に保存する。フォルダは pick() で変えられ、パスは localStorage の sk_office_native_dir
+//       ファイルの形・ID・Google ドライブの扱いは Web 版と同じ
 //   どれも Promise を返す（state()・folderName()・supported・place()・driveState() だけはすぐ返す）
 (function () {
   "use strict";
@@ -22,8 +25,16 @@
   var FORMAT = "sk-hub-office";
   var FILE_VERSION = 2; // 1 は 0.1。2 は書式・複数シート・ノートなどを足した形（1 も読める）
   var LS_KEY = "sk_office_files";
-  var supported = typeof window.showDirectoryPicker === "function" && window.isSecureContext;
-  var folder = null, state = supported ? "none" : "unsupported";
+  // デスクトップ版（platform.js）は、Rust の命令でフォルダを直接読み書きする（native）。毎回の許可は要らず、最初から ドキュメント\SK Hub Office に保存できる
+  var Platform = window.OfficePlatform || null;
+  var native = !!(Platform && Platform.features.nativeFs);
+  var DIR_KEY = "sk_office_native_dir";
+  var supported = native || (typeof window.showDirectoryPicker === "function" && window.isSecureContext);
+  var folder = null, dir = "", state = supported ? "none" : "unsupported";
+  function nativeRun(cmd, args) { return Platform.invoke(cmd, args); }
+  function dirName(p) { var a = String(p).replace(/[\\/]+$/, "").split(/[\\/]/); return a[a.length - 1] || p; }
+  function samePath(a, b) { return String(a).replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase() === String(b).replace(/[\\/]+$/, "").replace(/\//g, "\\").toLowerCase(); }
+  function parentOf(p) { return String(p).replace(/[\\/][^\\/]*$/, ""); }
 
   function appOf(fileName) {
     for (var a in EXT) if (fileName.toLowerCase().slice(-EXT[a].length) === EXT[a]) return a;
@@ -63,13 +74,17 @@
   function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
   // ---------- フォルダ ----------
-  function ready() { return state === "ready" && folder; }
+  function ready() { return state === "ready" && (native ? dir : folder); }
   function clean(name) {
     var s = String(name || "").replace(/[\\/:*?"<>|\u0000-\u001f]/g, "_").replace(/^[.\s]+|[.\s]+$/g, "").slice(0, 100);
     return s || "無題";
   }
   function exists(fileName) {
+    if (native) return nativeRun("fs_exists", { dir: dir, name: fileName }).catch(function () { return false; });
     return folder.getFileHandle(fileName).then(function () { return true; }, function () { return false; });
+  }
+  function removeFile(fileName) {
+    return native ? nativeRun("fs_remove", { dir: dir, name: fileName }) : folder.removeEntry(fileName);
   }
   // 同じ名前があるときは「名前 (2)」のようにする（except は自分自身の名前。名前を変えないときに使う）
   function uniqueName(name, app, except) {
@@ -82,6 +97,7 @@
     return next();
   }
   function write(fileName, text) {
+    if (native) return nativeRun("fs_write", { dir: dir, name: fileName, text: text });
     return folder.getFileHandle(fileName, { create: true }).then(function (h) {
       return h.createWritable().then(function (w) { return w.write(text).then(function () { return w.close(); }); });
     });
@@ -93,6 +109,7 @@
   var handles = {}, handleSeq = 0;
   function isHandleId(id) { return id.charAt(0) === "@"; }
   function writeHandle(h, text) {
+    if (h.native) return nativeRun("fs_write_path", { path: h.path, text: text });
     var ask = typeof h.requestPermission === "function" ? h.requestPermission({ mode: "readwrite" }) : Promise.resolve("granted");
     return ask.then(function (p) {
       if (p !== "granted") throw new Error("no-permission");
@@ -128,7 +145,8 @@
     supported: supported,
     appOf: appOf,
     state: function () { return state; },
-    folderName: function () { return folder ? folder.name : ""; },
+    folderName: function () { return native ? (dir ? dirName(dir) : "") : folder ? folder.name : ""; },
+    folderPath: function () { return native ? dir : ""; }, // デスクトップ版だけ（フォルダの場所。画面に出す用）
     isDrive: isDrive,
     driveState: driveState,
     drive: Drive,
@@ -139,6 +157,13 @@
     // 前に選んだフォルダを読み出して、許可があるか確かめる
     init: function () {
       if (!supported) return Promise.resolve(state);
+      if (native) {
+        // 前に選んだフォルダ。なければ ドキュメント\SK Hub Office。フォルダが消えていたら、最初のフォルダに戻す
+        var saved = ""; try { saved = localStorage.getItem(DIR_KEY) || ""; } catch (e) { /* なし */ }
+        return (saved ? nativeRun("dir_exists", { dir: saved }) : Promise.resolve(false)).then(function (ok) {
+          return ok ? saved : nativeRun("default_dir");
+        }).then(function (p) { dir = p; state = "ready"; return state; }, function () { state = "none"; return state; });
+      }
       return idbGet("folder").then(function (h) {
         if (!h) { state = "none"; return state; }
         folder = h;
@@ -147,6 +172,14 @@
     },
     // フォルダを選ぶ（ボタンを押したときに呼ぶ）。やめたら false
     pick: function () {
+      if (native) {
+        return nativeRun("pick_folder", { start: dir || null }).then(function (p) {
+          if (!p) return false;
+          dir = p; state = "ready";
+          try { localStorage.setItem(DIR_KEY, p); } catch (e) { /* このページだけ */ }
+          return true;
+        }, function () { return false; });
+      }
       return window.showDirectoryPicker({ id: "sk-hub-office", mode: "readwrite", startIn: "documents" }).then(function (h) {
         folder = h; state = "ready";
         return idbSet("folder", h).catch(function () {}).then(function () { return true; });
@@ -154,6 +187,7 @@
     },
     // 前に選んだフォルダを使う許可をもらう（ボタンを押したときに呼ぶ）
     allow: function () {
+      if (native) return Promise.resolve(state === "ready"); // デスクトップ版は許可が要らない
       if (!folder) return Promise.resolve(false);
       return folder.requestPermission({ mode: "readwrite" }).then(function (p) { state = p === "granted" ? "ready" : "needs-permission"; return state === "ready"; }, function () { return false; });
     },
@@ -171,6 +205,11 @@
     listLocal: function () {
       if (!supported) return Promise.resolve(lsAll().map(function (f) { return { id: f.id, app: f.app, name: f.name, updated: f.updated, place: "local" }; }));
       if (!ready()) return Promise.resolve([]);
+      if (native) {
+        return nativeRun("fs_list", { dir: dir }).then(function (all) {
+          return all.map(function (e) { return { id: e.name, app: appOf(e.name), name: baseName(e.name), updated: e.modified, size: e.size, place: "local" }; });
+        });
+      }
       var out = [], it = folder.values();
       function step() {
         return it.next().then(function (r) {
@@ -196,6 +235,12 @@
       if (isHandleId(id)) {
         var hd = handles[id];
         if (!hd) return Promise.resolve(null);
+        if (hd.native) {
+          return nativeRun("fs_read_path", { path: hd.path }).then(function (c) {
+            var o = parse(c.text, appOf(hd.name));
+            return { id: id, app: o.app, name: baseName(hd.name), tpl: o.tpl, created: o.created, updated: c.modified, data: o.data, outside: true };
+          }).catch(function () { return null; });
+        }
         return hd.getFile().then(function (file) {
           return file.text().then(function (text) {
             var o = parse(text, appOf(hd.name));
@@ -205,6 +250,12 @@
       }
       if (!supported) return Promise.resolve(lsAll().filter(function (f) { return f.id === id; })[0] || null);
       if (!ready()) return Promise.resolve(null);
+      if (native) {
+        return nativeRun("fs_read", { dir: dir, name: id }).then(function (c) {
+          var o = parse(c.text, appOf(id));
+          return { id: id, app: o.app, name: baseName(id), tpl: o.tpl, created: o.created, updated: c.modified, data: o.data };
+        }).catch(function () { return null; });
+      }
       return folder.getFileHandle(id).then(function (h) { return h.getFile(); }).then(function (file) {
         return file.text().then(function (text) {
           var o = parse(text, appOf(id));
@@ -253,7 +304,7 @@
         return uniqueName(name, f.app, f.id).then(function (fileName) {
           if (fileName === f.id) return f;
           var old = f.id;
-          return write(fileName, payload(f)).then(function () { return folder.removeEntry(old); }).then(function () {
+          return write(fileName, payload(f)).then(function () { return removeFile(old); }).then(function () {
             f.id = fileName; f.name = baseName(fileName); f.updated = Date.now();
             return f;
           });
@@ -264,7 +315,7 @@
     remove: function (id) {
       if (isDrive(id)) return Drive.trash(gid(id));
       if (!supported) { lsSave(lsAll().filter(function (f) { return f.id !== id; })); return Promise.resolve(); }
-      return inOrder(function () { return folder.removeEntry(id); });
+      return inOrder(function () { return removeFile(id); });
     },
     // コピーは、もとのファイルと同じ場所に作る（共有されたファイルのコピーは、自分のドライブに作る）
     copy: function (f, name) { return Store.create(f.app, name, f.tpl, JSON.parse(JSON.stringify(f.data)), isDrive(f.id) ? "drive" : "local"); },
@@ -293,6 +344,18 @@
         handles[id] = h;
         return id;
       });
+    },
+    // デスクトップ版: パスで開く（起動の引数・ダブルクリック）。選んだフォルダの直下ならふつうの ID、外なら「@番号/ファイル名」
+    openPath: function (path) {
+      var name = String(path).split(/[\\/]/).pop();
+      if (ready() && samePath(parentOf(path), dir)) return Promise.resolve(name);
+      var id = "@" + (++handleSeq) + "/" + name;
+      handles[id] = { native: true, path: path, name: name };
+      return Promise.resolve(id);
+    },
+    // 起動の引数で渡されたファイル（デスクトップ版）のパスの一覧
+    launchFiles: function () {
+      return Platform && Platform.features.launchFiles ? nativeRun("launch_files").catch(function () { return []; }) : Promise.resolve([]);
     },
     isOutside: isHandleId,
 

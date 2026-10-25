@@ -4,10 +4,10 @@
 //   ・フォント（Google Fonts）: 取っておいたものをすぐ使い、後ろで新しいものに入れかえる
 //   ・置く場所は Office のいちばん上（office.sk-hub.jp/sw.js・手元では /office/sw.js）。scope も同じ
 //   画面の部品を大きく変えたときは VERSION を上げる（古い取っておきを消す）
-const VERSION = "sk-office-v21";
+const VERSION = "sk-office-v22";
 const BASE = new URL("./", self.location).pathname; // "/" または "/office/"
 const SHELL = ["", "doc/", "sheet/", "slide/", "about/", "manifest.json", "doc/manifest.json", "sheet/manifest.json", "slide/manifest.json",
-  "shared/office.css", "shared/office.js", "shared/store.js", "shared/drive.js", "shared/templates.js",
+  "shared/office.css", "shared/office.js", "shared/platform.js", "shared/store.js", "shared/drive.js", "shared/templates.js",
   "shared/doc.js", "shared/sheet.js", "shared/slide.js", "shared/formula.js", "shared/chart.js", "shared/zip.js", "shared/vendor/opentype.min.js",
   "icons/favicon-32.png", "icons/icon-192.png", "icons/doc-192.png", "icons/sheet-192.png", "icons/slide-192.png"].map((p) => BASE + p)
   .concat(["https://sk-hub.jp/toolbox/shared/m3.css", "https://sk-hub.jp/toolbox/shared/m3.js", "https://sk-hub.jp/assets/i18n.js", "https://sk-hub.jp/assets/fonts.js", "https://sk-hub.jp/assets/coming-soon.js", "https://sk-hub.jp/assets/maintenance.js"]);

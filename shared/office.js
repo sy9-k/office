@@ -1590,7 +1590,8 @@
   Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); });
   // オフラインでも開けるように（/office/sw.js）
   // 手元（localhost）では登録しない（直したところがキャッシュで見えなくなるため。前に入ったものは外す）
-  var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  // デスクトップ版は画面を同梱しているので、サービスワーカーは使わない（前に入ったものは外す）
+  var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || (window.OfficePlatform && OfficePlatform.isDesktop);
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     if (LOCAL) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }).catch(function () {});
     else navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(function () { /* なくても使える */ });
@@ -1602,6 +1603,11 @@
       Store.init().then(function () { return Store.openHandle(params.files[0]); }).then(function (id) { openFile(id); }).catch(failed);
     });
   }
+  // デスクトップ版: 起動の引数のファイル（.skdoc などをダブルクリックして起動したとき）
+  if (APPS[APP]) Store.launchFiles().then(function (paths) {
+    if (!paths.length) return;
+    return Store.init().then(function () { return Store.openPath(paths[0]); }).then(function (id) { openFile(id); });
+  }).catch(failed);
   // 起動画面は、少し見せてから消す
   var splash = $("splash");
   if (splash) setTimeout(function () {
