@@ -171,6 +171,76 @@ async fn fs_write_path(path: String, text: String) -> Result<(), String> {
 
 static WINDOW_SEQ: AtomicUsize = AtomicUsize::new(0);
 
+// このアプリが Doc・Sheet・Slide のどれか。識別子の最後（jp.sk-hub.office.doc の doc）で決まる（アプリごとの設定は desktop/apps/）。
+// どれでもない（開発用のすべて入り）なら "hub"
+fn app_kind(app: &tauri::AppHandle) -> &'static str {
+    match app.config().identifier.rsplit('.').next() {
+        Some("doc") => "doc",
+        Some("sheet") => "sheet",
+        Some("slide") => "slide",
+        _ => "hub",
+    }
+}
+
+fn home_page(kind: &str) -> &'static str {
+    match kind {
+        "doc" => "doc/index.html",
+        "sheet" => "sheet/index.html",
+        "slide" => "slide/index.html",
+        _ => "index.html",
+    }
+}
+
+fn app_title(kind: &str) -> &'static str {
+    match kind {
+        "doc" => "SK Hub Office Doc",
+        "sheet" => "SK Hub Office Sheet",
+        "slide" => "SK Hub Office Slide",
+        _ => "SK Hub Office",
+    }
+}
+
+// ---------- アプリのあいだで共有する設定 ----------
+// 識別子がちがうと、画面（WebView）の保存場所（localStorage）がアプリごとに分かれる。ログイン・Google ドライブのつなぎ・保存先のフォルダ・設定は、
+// どのアプリでも同じにしたいので、決まったキーだけを共有のファイル（%APPDATA%\SK Hub Office\shared.json）に写す
+//   画面側（shared/platform.js）が、ウィンドウを開くときにここから localStorage に戻し、変えたときにここへ書く
+const SHARED_KEYS: [&str; 5] = ["skhub_account", "sk_office_drive", "sk_office_place", "sk_office_native_dir", "sk_office_settings"];
+static SHARED_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn shared_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app.path().data_dir().map_err(|e| e.to_string())?.join("SK Hub Office");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("shared.json"))
+}
+
+fn read_shared(app: &tauri::AppHandle) -> std::collections::BTreeMap<String, String> {
+    shared_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+async fn shared_all(app: tauri::AppHandle) -> std::collections::BTreeMap<String, String> {
+    read_shared(&app)
+}
+
+// value が null なら消す。決まったキーだけ
+#[tauri::command]
+async fn shared_set(app: tauri::AppHandle, key: String, value: Option<String>) -> Result<(), String> {
+    if !SHARED_KEYS.contains(&key.as_str()) {
+        return Err("bad-key".into());
+    }
+    let _guard = SHARED_LOCK.lock().map_err(|e| e.to_string())?;
+    let mut all = read_shared(&app);
+    match value {
+        Some(v) => all.insert(key, v),
+        None => all.remove(&key),
+    };
+    write_atomic(&shared_path(&app)?, &serde_json::to_string(&all).map_err(|e| e.to_string())?)
+}
+
 fn page_of_file(path: &str) -> &'static str {
     let lower = path.to_lowercase();
     if lower.ends_with(".skdoc") {
@@ -201,13 +271,16 @@ fn open_window(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Opt
         return Err(format!("bad-page: {page}"));
     }
     let label = format!("w{}", WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
+    let kind = app_kind(app);
     let script = format!(
-        "(function(){{try{{var h={};if(h&&!location.hash)history.replaceState(null,'','#'+h);window.__SK_OPEN__={};}}catch(e){{}}}})();",
+        "(function(){{try{{var h={};if(h&&!location.hash)history.replaceState(null,'','#'+h);window.__SK_OPEN__={};window.__SK_APP__={};window.__SK_SHARED__={};}}catch(e){{}}}})();",
         serde_json::to_string(&hash).map_err(|e| e.to_string())?,
         serde_json::to_string(&open.map(|o| vec![o]).unwrap_or_default()).map_err(|e| e.to_string())?,
+        serde_json::to_string(kind).map_err(|e| e.to_string())?,
+        serde_json::to_string(&read_shared(app)).map_err(|e| e.to_string())?,
     );
     tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::App(page.into()))
-        .title("SK Hub Office")
+        .title(app_title(kind))
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 560.0)
         .initialization_script(script)
@@ -223,7 +296,7 @@ fn open_files_or_hub(app: &tauri::AppHandle, files: Vec<String>) {
             let _ = w.unminimize();
             let _ = w.set_focus();
         } else {
-            let _ = open_window(app, "index.html", None, None);
+            let _ = open_window(app, home_page(app_kind(app)), None, None);
         }
         return;
     }
@@ -520,6 +593,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             new_window,
+            shared_all,
+            shared_set,
             external_login,
             external_login_cancel,
             open_external,

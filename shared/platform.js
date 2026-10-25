@@ -64,6 +64,44 @@
   window.OfficePlatform = Platform;
   document.documentElement.setAttribute("data-platform", Platform.kind);
 
+  // このアプリが Doc・Sheet・Slide のどれか（アプリごとに別々にインストールする。Rust がウィンドウを開くときに入れる）。開発用のすべて入りは "hub"
+  Platform.app = desktop && typeof window.__SK_APP__ === "string" ? window.__SK_APP__ : "";
+
+  // ---------- アプリのあいだで共有する設定 ----------
+  //   アプリごとに画面の保存場所（localStorage）が分かれるので、ログイン・Google ドライブ・保存先のフォルダ・設定は、共有のファイル（Rust の shared_all・shared_set）に写す
+  //   開くときに共有のファイルから localStorage に戻し、変えたら共有のファイルにも書く。ほかのアプリで変えたら、前に出したときに取りこむ
+  var SHARED = ["skhub_account", "sk_office_drive", "sk_office_place", "sk_office_native_dir", "sk_office_settings"];
+  if (desktop) {
+    var rawSet = Storage.prototype.setItem, rawRemove = Storage.prototype.removeItem;
+    var apply = function (all) {
+      var changed = false;
+      SHARED.forEach(function (k) {
+        try {
+          var now = localStorage.getItem(k), next = Object.prototype.hasOwnProperty.call(all, k) ? all[k] : null;
+          if (now === next) return;
+          if (next === null) rawRemove.call(localStorage, k); else rawSet.call(localStorage, k, next);
+          changed = true;
+        } catch (e) { /* 戻せなくても、このウィンドウでは使える */ }
+      });
+      return changed;
+    };
+    if (window.__SK_SHARED__) apply(window.__SK_SHARED__);
+    Storage.prototype.setItem = function (k, v) {
+      rawSet.call(this, k, v);
+      if (this === window.localStorage && SHARED.indexOf(k) >= 0) Platform.invoke("shared_set", { key: k, value: String(v) }).catch(function () {});
+    };
+    Storage.prototype.removeItem = function (k) {
+      rawRemove.call(this, k);
+      if (this === window.localStorage && SHARED.indexOf(k) >= 0) Platform.invoke("shared_set", { key: k, value: null }).catch(function () {});
+    };
+    // ほかのアプリで変えたもの（ログイン・Google ドライブなど）を、前に出したときに取りこむ。変わったら sk-shared を知らせる
+    var pull = function () {
+      Platform.invoke("shared_all").then(function (all) { if (apply(all)) window.dispatchEvent(new Event("sk-shared")); }).catch(function () {});
+    };
+    window.addEventListener("focus", pull);
+    document.addEventListener("visibilitychange", function () { if (!document.hidden) pull(); });
+  }
+
   // ウィンドウのタイトルを、画面の題名（ファイル名 — Doc | SK Hub Office）に合わせる
   if (desktop && T.window && T.window.getCurrentWindow) {
     var win = T.window.getCurrentWindow(), last = "";

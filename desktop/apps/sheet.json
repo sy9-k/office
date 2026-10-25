@@ -1,0 +1,10 @@
+{
+  "productName": "SK Hub Office Sheet",
+  "identifier": "jp.sk-hub.office.sheet",
+  "bundle": {
+    "icon": ["icons/sheet/32x32.png", "icons/sheet/128x128.png", "icons/sheet/128x128@2x.png", "icons/sheet/icon.ico"],
+    "fileAssociations": [
+      { "ext": ["sksheet"], "name": "SK Hub Office Sheet", "description": "SK Hub Office 表計算", "mimeType": "application/x-sk-hub-office-sheet", "role": "Editor" }
+    ]
+  }
+}

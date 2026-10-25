@@ -259,13 +259,21 @@
     if ($("home") && !$("home").hidden) renderStart();
     notify(t("このアプリのログインを外しました"));
   }
-  // デスクトップ版: 外のサイトのリンクは、画面の中ではなく、いつものブラウザで開く
+  // デスクトップ版: 外のサイトのリンクは、画面の中ではなく、いつものブラウザで開く。ほかのアプリ（Doc・Sheet・Slide）へのリンクは、新しいウィンドウで開く
+  //   （アプリごとに別々に入れているので、このウィンドウを別のアプリに変えない）
   if (DESKTOP) document.addEventListener("click", function (e) {
     var a = e.target.closest && e.target.closest("a[href]");
-    if (!a || !/^https?:/i.test(a.href) || a.origin === location.origin) return;
+    if (!a || !/^https?:/i.test(a.href)) return;
+    if (a.origin === location.origin) {
+      var m = /^\/(doc|sheet|slide)\//.exec(a.pathname);
+      if (m && m[1] !== APP && OfficePlatform.app && OfficePlatform.app !== "hub") { e.preventDefault(); OfficePlatform.openWindow(m[1]); }
+      return;
+    }
     e.preventDefault();
     OfficePlatform.openExternal(a.href).catch(function () { notify(t("リンクを開けませんでした")); });
   });
+  // ほかのアプリでログインやログアウトをしたとき（前に出したときに取りこむ）
+  window.addEventListener("sk-shared", function () { fillAvatars(); if ($("home") && !$("home").hidden) renderStart(); });
   var asking = false;
   function askReconnect() {
     if (asking) return;

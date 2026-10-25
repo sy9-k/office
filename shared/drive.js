@@ -30,6 +30,8 @@
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } }
   function store(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* 覚えられなくても、このページでは使える */ } }
   var saved = load();
+  // デスクトップ版でほかのアプリがつなぎなおしたとき（platform.js の共有）に、読みなおす
+  window.addEventListener("sk-shared", function () { saved = load(); });
   function tokenOk() { return saved.token && saved.exp > Date.now() + 60000; }
   // デスクトップ版は、保管したリフレッシュトークンで、切れたトークンを自動で取りなおせる（saved.rt: つないだときに保管できたか）
   function canRefresh() { return desk && !!saved.rt; }

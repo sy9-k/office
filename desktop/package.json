@@ -2,11 +2,18 @@
   "name": "sk-hub-office-desktop",
   "private": true,
   "version": "0.1.0",
-  "description": "SK Hub Office のデスクトップ版（Tauri 2）。画面は ../ の Web 版をそのまま同梱する",
+  "description": "SK Hub Office のデスクトップ版（Tauri 2）。Doc・Sheet・Slide は別々のアプリ。画面は ../ の Web 版をそのまま同梱する",
   "scripts": {
     "prepare-web": "node scripts/prepare-web.mjs",
     "dev": "npm run prepare-web && tauri dev",
+    "dev:doc": "npm run prepare-web && tauri dev --config apps/doc.json",
+    "dev:sheet": "npm run prepare-web && tauri dev --config apps/sheet.json",
+    "dev:slide": "npm run prepare-web && tauri dev --config apps/slide.json",
     "build": "npm run prepare-web && tauri build",
+    "build:doc": "npm run prepare-web && tauri build --config apps/doc.json",
+    "build:sheet": "npm run prepare-web && tauri build --config apps/sheet.json",
+    "build:slide": "npm run prepare-web && tauri build --config apps/slide.json",
+    "build:all": "npm run build:doc && npm run build:sheet && npm run build:slide",
     "tauri": "tauri"
   },
   "devDependencies": {
