@@ -199,7 +199,7 @@ Edge か Chrome を見えないまま開いて、テンプレートと `_tests/o
 | `office/shared/office.css` | 見た目（色・スタート画面・リボン・メニュー・各エディタ・スライド ショー・タイトルバー・印刷） |
 | `office/doc/`・`sheet/`・`slide/manifest.json` | アプリごとの PWA（インストール・ファイルの関連付け） |
 | `office/manifest.json`・`office/sw.js` | 入り口の PWA・オフライン（サービスワーカーは全アプリ共通） |
-| `office/icons/` | アイコン（`python _build/office/icons.py` で作り直す） |
+| `office/icons/` | アイコン（`python _build/icons.py`（元の絵は `icons/src/`） で作り直す） |
 | `assets/hub/bridge.js` | sk-hub.jp からログイン中かのヒントを受け取る（office.sk-hub.jp も使う） |
 | `_workers/office/` | office.sk-hub.jp の Worker |
 | `_build/pages/office.html`・`products/office/` | 紹介ページ（build で作る） |
