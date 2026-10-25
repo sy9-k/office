@@ -14,11 +14,11 @@
   --fl-in: cubic-bezier(.1, .9, .2, 1);
   --fl-out: cubic-bezier(.9, .1, 1, .2);
   /* ファイルの一覧のアイコンの色（アプリごと。テーマで変えない） */
-  --doc-c: #2563eb; --sheet-c: #16a34a; --slide-c: #ea580c;
+  --doc-c: #2563eb; --sheet-c: #16a34a; --slide-c: #d9a000;
   color-scheme: light;
 }
 /* ---- SK's Blue（Doc・入り口） ---- */
-:root[data-app="doc"], :root[data-app="hub"] {
+:root[data-app="doc"] {
   --md-primary: #004ac6; --md-on-primary: #ffffff; --md-primary-container: #2563eb; --md-on-primary-container: #eeefff;
   --md-secondary-container: #acbfff; --md-on-secondary-container: #394c84;
   --md-tertiary: #943700; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
@@ -26,6 +26,16 @@
   --md-surface-container-low: #f3f3fe; --md-surface-container: #ededf9; --md-surface-container-high: #e7e7f3; --md-surface-container-highest: #e1e2ed;
   --md-outline: #737686; --md-outline-variant: #c3c6d7;
   --md-inverse-surface: #2e3039; --md-inverse-on-surface: #f0f0fb; --md-inverse-primary: #b4c5ff;
+}
+/* ---- SK's Slate（入り口。Doc・Sheet・Slide の 3 色は差し色にして、主役の色はおさえた紺） ---- */
+:root[data-app="hub"] {
+  --md-primary: #35456b; --md-on-primary: #ffffff; --md-primary-container: #44558a; --md-on-primary-container: #eef0ff;
+  --md-secondary-container: #d9deef; --md-on-secondary-container: #2f3a5c;
+  --md-tertiary: #943700; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
+  --md-surface: #f8f9fd; --md-on-surface: #1a1c23; --md-on-surface-variant: #444853;
+  --md-surface-container-low: #f1f2f8; --md-surface-container: #ebecf3; --md-surface-container-high: #e5e6ee; --md-surface-container-highest: #dfe0e8;
+  --md-outline: #747784; --md-outline-variant: #c4c6d3;
+  --md-inverse-surface: #2f3139; --md-inverse-on-surface: #f0f0fa; --md-inverse-primary: #b6c4f5;
 }
 /* ---- SK's Matcha（Sheet） ---- */
 :root[data-app="sheet"] {
@@ -37,20 +47,20 @@
   --md-outline: #6e7b6c; --md-outline-variant: #bdcaba;
   --md-inverse-surface: #2b322b; --md-inverse-on-surface: #ecf3e7; --md-inverse-primary: #62df7d;
 }
-/* ---- SK's Mikan（Slide） ---- */
+/* ---- SK's Gold（Slide） ---- */
 :root[data-app="slide"] {
-  --md-primary: #a33900; --md-on-primary: #ffffff; --md-primary-container: #cc4900; --md-on-primary-container: #fffbff;
-  --md-secondary-container: #ff9971; --md-on-secondary-container: #772f0f;
+  --md-primary: #7a5900; --md-on-primary: #ffffff; --md-primary-container: #e0aa00; --md-on-primary-container: #3d2c00;
+  --md-secondary-container: #fbe29a; --md-on-secondary-container: #5a4200;
   --md-tertiary: #005da8; --md-tertiary-container: #0076d2; --md-on-tertiary-container: #fdfcff;
-  --md-surface: #fff8f6; --md-on-surface: #261813; --md-on-surface-variant: #5a4138;
-  --md-surface-container-low: #fff1ec; --md-surface-container: #ffe9e2; --md-surface-container-high: #fee2d9; --md-surface-container-highest: #f8ddd4;
-  --md-outline: #8e7166; --md-outline-variant: #e2bfb2;
-  --md-inverse-surface: #3d2d27; --md-inverse-on-surface: #ffede7; --md-inverse-primary: #ffb599;
+  --md-surface: #fffbf2; --md-on-surface: #1f1b10; --md-on-surface-variant: #4e4636;
+  --md-surface-container-low: #fbf5e6; --md-surface-container: #f5efe0; --md-surface-container-high: #efe9da; --md-surface-container-highest: #eae3d4;
+  --md-outline: #7f7663; --md-outline-variant: #d2c5ac;
+  --md-inverse-surface: #353024; --md-inverse-on-surface: #f9f0de; --md-inverse-primary: #f2c02e;
 }
 /* ---- ダーク（端末の設定・Toolbox の設定）。2 つの書き方で同じ中身をくり返す（値を変えるときは両方） ---- */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --md-error: #ffb4ab; --doc-c: #6b9bff; --sheet-c: #4ade80; --slide-c: #fb8a4c; color-scheme: dark; }
-  :root[data-app="doc"]:not([data-theme="light"]), :root[data-app="hub"]:not([data-theme="light"]) {
+  :root:not([data-theme="light"]) { --md-error: #ffb4ab; --doc-c: #6b9bff; --sheet-c: #4ade80; --slide-c: #f5c542; color-scheme: dark; }
+  :root[data-app="doc"]:not([data-theme="light"]) {
     --md-primary: #b4c5ff; --md-on-primary: #002a78; --md-primary-container: #2563eb; --md-on-primary-container: #eeefff;
     --md-secondary-container: #33467e; --md-on-secondary-container: #a4b6f5;
     --md-tertiary: #ffb596; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
@@ -58,6 +68,15 @@
     --md-surface-container-low: #191b23; --md-surface-container: #1d1f27; --md-surface-container-high: #282a32; --md-surface-container-highest: #32343d;
     --md-outline: #8d90a0; --md-outline-variant: #434655;
     --md-inverse-surface: #e1e2ed; --md-inverse-on-surface: #2e3039; --md-inverse-primary: #0053db;
+  }
+  :root[data-app="hub"]:not([data-theme="light"]) {
+    --md-primary: #b8c4ee; --md-on-primary: #1e2b52; --md-primary-container: #44558a; --md-on-primary-container: #eef0ff;
+    --md-secondary-container: #38425f; --md-on-secondary-container: #bcc6e8;
+    --md-tertiary: #ffb596; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
+    --md-surface: #121318; --md-on-surface: #e3e2e9; --md-on-surface-variant: #c5c6d0;
+    --md-surface-container-low: #1a1b21; --md-surface-container: #1e1f25; --md-surface-container-high: #292a30; --md-surface-container-highest: #34343b;
+    --md-outline: #8f909a; --md-outline-variant: #44464f;
+    --md-inverse-surface: #e3e2e9; --md-inverse-on-surface: #2f3036; --md-inverse-primary: #4a5d8f;
   }
   :root[data-app="sheet"]:not([data-theme="light"]) {
     --md-primary: #62df7d; --md-on-primary: #003914; --md-primary-container: #1ca64d; --md-on-primary-container: #002e0f;
@@ -69,17 +88,17 @@
     --md-inverse-surface: #dde5d9; --md-inverse-on-surface: #2b322b; --md-inverse-primary: #006e2d;
   }
   :root[data-app="slide"]:not([data-theme="light"]) {
-    --md-primary: #ffb599; --md-on-primary: #5a1c00; --md-primary-container: #f66018; --md-on-primary-container: #401100;
-    --md-secondary-container: #7c3313; --md-on-secondary-container: #ffa17c;
+    --md-primary: #f5c542; --md-on-primary: #3f2e00; --md-primary-container: #c99700; --md-on-primary-container: #1f1500;
+    --md-secondary-container: #5a4500; --md-on-secondary-container: #f5d77f;
     --md-tertiary: #a4c9ff; --md-tertiary-container: #2192fd; --md-on-tertiary-container: #002141;
-    --md-surface: #1d100b; --md-on-surface: #f8ddd4; --md-on-surface-variant: #e2bfb2;
-    --md-surface-container-low: #261813; --md-surface-container: #2b1c17; --md-surface-container-high: #362621; --md-surface-container-highest: #42312b;
-    --md-outline: #a98a7e; --md-outline-variant: #5a4138;
-    --md-inverse-surface: #f8ddd4; --md-inverse-on-surface: #3d2d27; --md-inverse-primary: #a73a00;
+    --md-surface: #17130a; --md-on-surface: #ebe2cf; --md-on-surface-variant: #d2c5ac;
+    --md-surface-container-low: #1f1b11; --md-surface-container: #241f15; --md-surface-container-high: #2f2a1f; --md-surface-container-highest: #3a3529;
+    --md-outline: #9a8f77; --md-outline-variant: #4e4636;
+    --md-inverse-surface: #ebe2cf; --md-inverse-on-surface: #353024; --md-inverse-primary: #7a5900;
   }
 }
-:root[data-theme="dark"] { --md-error: #ffb4ab; --doc-c: #6b9bff; --sheet-c: #4ade80; --slide-c: #fb8a4c; color-scheme: dark; }
-:root[data-app="doc"][data-theme="dark"], :root[data-app="hub"][data-theme="dark"] {
+:root[data-theme="dark"] { --md-error: #ffb4ab; --doc-c: #6b9bff; --sheet-c: #4ade80; --slide-c: #f5c542; color-scheme: dark; }
+:root[data-app="doc"][data-theme="dark"] {
   --md-primary: #b4c5ff; --md-on-primary: #002a78; --md-primary-container: #2563eb; --md-on-primary-container: #eeefff;
   --md-secondary-container: #33467e; --md-on-secondary-container: #a4b6f5;
   --md-tertiary: #ffb596; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
@@ -87,6 +106,15 @@
   --md-surface-container-low: #191b23; --md-surface-container: #1d1f27; --md-surface-container-high: #282a32; --md-surface-container-highest: #32343d;
   --md-outline: #8d90a0; --md-outline-variant: #434655;
   --md-inverse-surface: #e1e2ed; --md-inverse-on-surface: #2e3039; --md-inverse-primary: #0053db;
+}
+:root[data-app="hub"][data-theme="dark"] {
+  --md-primary: #b8c4ee; --md-on-primary: #1e2b52; --md-primary-container: #44558a; --md-on-primary-container: #eef0ff;
+  --md-secondary-container: #38425f; --md-on-secondary-container: #bcc6e8;
+  --md-tertiary: #ffb596; --md-tertiary-container: #bc4800; --md-on-tertiary-container: #ffede6;
+  --md-surface: #121318; --md-on-surface: #e3e2e9; --md-on-surface-variant: #c5c6d0;
+  --md-surface-container-low: #1a1b21; --md-surface-container: #1e1f25; --md-surface-container-high: #292a30; --md-surface-container-highest: #34343b;
+  --md-outline: #8f909a; --md-outline-variant: #44464f;
+  --md-inverse-surface: #e3e2e9; --md-inverse-on-surface: #2f3036; --md-inverse-primary: #4a5d8f;
 }
 :root[data-app="sheet"][data-theme="dark"] {
   --md-primary: #62df7d; --md-on-primary: #003914; --md-primary-container: #1ca64d; --md-on-primary-container: #002e0f;
@@ -98,13 +126,13 @@
   --md-inverse-surface: #dde5d9; --md-inverse-on-surface: #2b322b; --md-inverse-primary: #006e2d;
 }
 :root[data-app="slide"][data-theme="dark"] {
-  --md-primary: #ffb599; --md-on-primary: #5a1c00; --md-primary-container: #f66018; --md-on-primary-container: #401100;
-  --md-secondary-container: #7c3313; --md-on-secondary-container: #ffa17c;
+  --md-primary: #f5c542; --md-on-primary: #3f2e00; --md-primary-container: #c99700; --md-on-primary-container: #1f1500;
+  --md-secondary-container: #5a4500; --md-on-secondary-container: #f5d77f;
   --md-tertiary: #a4c9ff; --md-tertiary-container: #2192fd; --md-on-tertiary-container: #002141;
-  --md-surface: #1d100b; --md-on-surface: #f8ddd4; --md-on-surface-variant: #e2bfb2;
-  --md-surface-container-low: #261813; --md-surface-container: #2b1c17; --md-surface-container-high: #362621; --md-surface-container-highest: #42312b;
-  --md-outline: #a98a7e; --md-outline-variant: #5a4138;
-  --md-inverse-surface: #f8ddd4; --md-inverse-on-surface: #3d2d27; --md-inverse-primary: #a73a00;
+  --md-surface: #17130a; --md-on-surface: #ebe2cf; --md-on-surface-variant: #d2c5ac;
+  --md-surface-container-low: #1f1b11; --md-surface-container: #241f15; --md-surface-container-high: #2f2a1f; --md-surface-container-highest: #3a3529;
+  --md-outline: #9a8f77; --md-outline-variant: #4e4636;
+  --md-inverse-surface: #ebe2cf; --md-inverse-on-surface: #353024; --md-inverse-primary: #7a5900;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -139,27 +167,20 @@ h1, h2, h3, p { margin: 0; }
 .splash.is-done { opacity: 0; pointer-events: none; }
 .splash__in { position: relative; display: grid; justify-items: center; transition: transform .4s var(--ease), filter .4s var(--ease); }
 .splash.is-done .splash__in { transform: scale(1.08); filter: blur(8px); }
-.splash__mark { position: relative; width: 120px; height: 120px; margin-bottom: 24px; }
-.splash__mark i {
-  position: absolute; border-radius: 10px; background: var(--c);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .28), 0 10px 22px -8px color-mix(in srgb, var(--c) 80%, transparent);
-  animation: sp-tile .6s cubic-bezier(.3, 1.35, .5, 1) var(--d) backwards;
-}
-.splash__mark i:nth-child(1) { --c: #ea580c; --d: 0s; --from: translate(30px, -26px) rotate(16deg); left: 50px; top: 20px; width: 52px; height: 38px; }
-.splash__mark i:nth-child(2) { --c: #16a34a; --d: .08s; --from: translate(34px, 18px) rotate(-12deg); left: 35px; top: 39px; width: 50px; height: 42px; }
-.splash__mark i:nth-child(3) { --c: #2563eb; --d: .16s; --from: translate(-30px, 24px) rotate(-16deg); left: 17px; top: 57px; width: 46px; height: 46px; }
-@keyframes sp-tile { from { opacity: 0; transform: var(--from) scale(.5); } }
-/* タイルの中の印（Slide は見出し・Sheet は表の線・Doc は文字の行） */
-.splash__mark i::before, .splash__mark i::after { content: ""; position: absolute; border-radius: 2px; background: #fff; }
-.splash__mark i:nth-child(1)::before { left: 9px; top: 9px; width: 20px; height: 5px; opacity: .9; }
-.splash__mark i:nth-child(2)::before { inset: 15px 0 auto; height: 3px; border-radius: 0; opacity: .75; box-shadow: 0 14px 0 #fff; }
-.splash__mark i:nth-child(2)::after { left: 16px; top: 0; bottom: 0; width: 3px; border-radius: 0; opacity: .75; }
-.splash__mark i:nth-child(3)::before { left: 10px; right: 10px; top: 13px; height: 4px; box-shadow: 0 9px 0 #fff; }
-.splash__mark i:nth-child(3)::after { left: 10px; top: 31px; width: 16px; height: 4px; }
-:root[data-app="doc"] .splash__mark i:nth-child(3), :root[data-app="sheet"] .splash__mark i:nth-child(2), :root[data-app="slide"] .splash__mark i:nth-child(1) {
-  z-index: 1; animation: sp-tile .6s cubic-bezier(.3, 1.35, .5, 1) var(--d) backwards, sp-pick .4s var(--ease-sk) .55s both;
-}
-@keyframes sp-pick { to { scale: 1.1; } }
+.splash__mark { position: relative; width: 132px; height: 132px; margin-bottom: 24px; }
+.splash__mark i { position: absolute; inset: 0; background: center / contain no-repeat; filter: drop-shadow(0 10px 14px color-mix(in srgb, var(--md-primary-container) 35%, transparent)); }
+/* 入り口: アイコンの 3 つの面が、それぞれの向きから飛んできて 1 つの立方体になる（icons/office-part-*.png） */
+.splash__mark i:nth-child(1) { background-image: url("../icons/office-part-sheet.png"); --from: translate(0, -46px) scale(.6); --d: 0s; }
+.splash__mark i:nth-child(2) { background-image: url("../icons/office-part-slide.png"); --from: translate(-42px, 30px) scale(.6); --d: .1s; }
+.splash__mark i:nth-child(3) { background-image: url("../icons/office-part-doc.png"); --from: translate(42px, 30px) scale(.6); --d: .2s; }
+.splash__mark i { animation: sp-tile .65s cubic-bezier(.3, 1.3, .5, 1) var(--d) backwards; }
+@keyframes sp-tile { from { opacity: 0; transform: var(--from); } }
+/* 開いたアプリ: そのアプリのアイコンが 1 つ、ぽんと出る */
+:root[data-app="doc"] .splash__mark i:nth-child(1) { background-image: url("../icons/doc-logo.png"); }
+:root[data-app="sheet"] .splash__mark i:nth-child(1) { background-image: url("../icons/sheet-logo.png"); }
+:root[data-app="slide"] .splash__mark i:nth-child(1) { background-image: url("../icons/slide-logo.png"); }
+:root[data-app="doc"] .splash__mark i:nth-child(n+2), :root[data-app="sheet"] .splash__mark i:nth-child(n+2), :root[data-app="slide"] .splash__mark i:nth-child(n+2) { display: none; }
+:root:not([data-app="hub"]) .splash__mark i:nth-child(1) { --from: scale(.4) rotate(-12deg); animation-duration: .7s; }
 .splash__word { overflow: hidden; padding: 0 6px 4px; }
 .splash__name { display: block; font-size: 48px; font-weight: 700; line-height: 1.15; letter-spacing: -.02em; animation: sp-rise .65s var(--ease) .26s backwards; }
 @keyframes sp-rise { from { transform: translateY(110%); } }
@@ -188,12 +209,23 @@ h1, h2, h3, p { margin: 0; }
 .rail__logo { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; background: var(--md-primary-container); color: var(--md-on-primary-container); transition: border-radius .3s var(--ease); }
 .rail__brand:hover .rail__logo { border-radius: 24px; }
 .rail__logo .msr { font-size: 28px; }
+/* アプリのロゴ（icons/ の透明な PNG。六角形だけなので、まわりの色の板はなくす） */
+.app-logo { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+.rail__logo, .about__logo { background: none; border-radius: 0; }
+.rail__logo { width: 52px; height: 52px; transition: transform .3s var(--ease); }
+.rail__brand:hover .rail__logo { border-radius: 0; transform: scale(1.08); }
+.about__logo { width: 64px; height: 64px; }
+.tbar-logo { background: none; width: 36px; height: 36px; }
+.tbar-logo:hover { border-radius: 0; transform: scale(1.1); }
+.wco-bar__logo { width: 22px; height: 22px; }
 .rail__item {
   display: flex; flex-direction: column; align-items: center; gap: 4px; width: 80px; padding: 4px 0 8px; border: 0; background: none;
   color: inherit; text-decoration: none; cursor: pointer; font-size: 12px; font-weight: 500; line-height: 16px; text-align: center;
 }
 .rail__pill { position: relative; display: grid; place-items: center; width: 56px; height: 32px; border-radius: 16px; overflow: hidden; transition: background-color .2s linear; }
 .rail__item:hover .rail__pill { background: color-mix(in srgb, var(--md-on-surface) 8%, transparent); }
+.rail__item--hub .app-img { width: 26px; height: 26px; transition: transform .3s var(--ease-sk); }
+.rail__item--hub:hover .app-img { transform: scale(1.15) rotate(-6deg); }
 .rail__item[aria-current="page"] .rail__pill { background: var(--md-secondary-container); color: var(--md-on-secondary-container); animation: chip-pop .32s var(--ease-sk); }
 .rail__item[aria-current="page"] { font-weight: 700; color: var(--md-on-surface); }
 .rail__back { margin-bottom: 4px; }
@@ -302,9 +334,9 @@ h1, h2, h3, p { margin: 0; }
 .frow__open { min-width: 0; display: flex; align-items: center; gap: 16px; min-height: 60px; padding: 10px 8px 10px 16px; border: 0; background: none; text-align: left; cursor: pointer; }
 .frow__ico { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex: none; color: #fff; }
 .frow__ico .msr { font-size: 20px; }
-.frow[data-app="doc"] .frow__ico { background: var(--doc-c); }
-.frow[data-app="sheet"] .frow__ico { background: var(--sheet-c); }
-.frow[data-app="slide"] .frow__ico { background: var(--slide-c); }
+/* アプリ・ファイルの絵（icons/ の透明な PNG）。色の板はなし */
+.app-img { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; }
+.app-img--file { transform: scale(1.12); }
 .frow__text { min-width: 0; display: grid; }
 .frow__name { font-size: 14px; font-weight: 500; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .frow__meta { font-size: 12px; line-height: 16px; color: var(--md-on-surface-variant); }
@@ -371,12 +403,8 @@ h1, h2, h3, p { margin: 0; }
 .acct-product { font-size: 20px; line-height: 28px; }
 .acct-small { font-size: 13px; color: var(--md-on-surface-variant); }
 .acct-apps { display: flex; gap: 8px; }
-.acct-apps__ico { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; color: #fff; transition: transform .2s var(--ease); }
+.acct-apps__ico { width: 28px; height: 28px; display: grid; place-items: center; transition: transform .2s var(--ease); }
 .acct-apps__ico:hover { transform: translateY(-2px); }
-.acct-apps__ico .msr { font-size: 18px; }
-.acct-apps__ico[data-app="doc"] { background: var(--doc-c); }
-.acct-apps__ico[data-app="sheet"] { background: var(--sheet-c); }
-.acct-apps__ico[data-app="slide"] { background: var(--slide-c); }
 /* 大きなボタンと説明（Office の「更新オプション」「バージョン情報」） */
 .acct-tiles { display: grid; gap: 16px; }
 .acct-tile { display: flex; align-items: flex-start; gap: 16px; }
@@ -419,11 +447,34 @@ h1, h2, h3, p { margin: 0; }
 /* 入り口（/office/）の 3 つのアプリ */
 .apps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .app-tile { display: flex; align-items: center; gap: 16px; padding: 16px; border-radius: 16px; text-decoration: none; color: var(--md-on-surface); background: var(--md-surface-container-low); box-shadow: inset 0 0 0 1px var(--md-outline-variant); }
-.app-tile__ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; flex: none; color: #fff; background: var(--c); transition: border-radius .3s var(--ease); }
-.app-tile:hover .app-tile__ico { border-radius: 24px; }
+.app-tile__ico { width: 48px; height: 48px; border-radius: 14px; display: grid; place-items: center; flex: none; transition: transform .3s var(--ease); }
+.app-tile:hover .app-tile__ico { transform: scale(1.08); }
 .app-tile strong { display: block; font-size: 18px; font-weight: 700; line-height: 24px; }
 .app-tile small { font-size: 13px; color: var(--md-on-surface-variant); }
 .app-tile--doc { --c: var(--doc-c); } .app-tile--sheet { --c: var(--sheet-c); } .app-tile--slide { --c: var(--slide-c); }
+
+/* 入り口（hub）: アイコンとあいさつ・3 つのアプリの大きなカード */
+.hub-hero { display: flex; align-items: center; gap: 28px; }
+.hub-hero__logo { width: 112px; height: 112px; flex: none; animation: hub-pop .7s cubic-bezier(.3, 1.3, .5, 1) backwards; filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--md-primary) 28%, transparent)); }
+@keyframes hub-pop { from { opacity: 0; transform: scale(.6) rotate(-10deg); } }
+.hub-hero__text { display: grid; gap: 4px; min-width: 0; }
+.hub-hero__eyebrow { font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .2em; text-transform: uppercase; color: var(--md-on-surface-variant); }
+.hub-hero__lead { font-size: 16px; line-height: 24px; color: var(--md-on-surface-variant); }
+.apps--cards { gap: 16px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+.app-card {
+  --c: var(--md-primary); position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 20px; padding: 24px; border-radius: 28px; overflow: hidden;
+  text-decoration: none; color: var(--md-on-surface); background: linear-gradient(150deg, color-mix(in srgb, var(--c) 20%, var(--md-surface-container-low)), var(--md-surface-container-low) 70%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 28%, var(--md-outline-variant)); transition: transform .3s var(--ease-sk), box-shadow .2s linear;
+}
+.app-card--doc { --c: var(--doc-c); } .app-card--sheet { --c: var(--sheet-c); } .app-card--slide { --c: var(--slide-c); }
+.app-card:hover { transform: translateY(-4px); box-shadow: inset 0 0 0 2px var(--c), 0 14px 28px -10px color-mix(in srgb, var(--c) 55%, transparent); }
+.app-card__ico { grid-row: span 2; width: 88px; height: 88px; transition: transform .35s var(--ease-sk); filter: drop-shadow(0 8px 12px color-mix(in srgb, var(--c) 35%, transparent)); }
+.app-card:hover .app-card__ico { transform: scale(1.1) rotate(-4deg); }
+.app-card__text { display: grid; align-self: end; }
+.app-card strong { font-size: 24px; font-weight: 700; line-height: 32px; }
+.app-card small { font-size: 14px; line-height: 20px; color: var(--md-on-surface-variant); }
+.app-card__go { align-self: start; justify-self: start; display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 4px 12px 4px 8px; border-radius: 16px; font-size: 13px; font-weight: 500; line-height: 20px; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--md-on-surface); }
+.app-card__go .msr { font-size: 18px; }
 
 /* 「アプリ」（SK Hub のアプリを全部出すページ） */
 .skapps__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
@@ -951,7 +1002,13 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
   .frow__when-sm { display: inline; }
   .frow__act [data-pin][aria-pressed="false"] { display: none; }
   .open { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .apps { grid-template-columns: minmax(0, 1fr); }
+  .apps, .apps--cards { grid-template-columns: minmax(0, 1fr); }
+  .hub-hero { gap: 16px; }
+  .hub-hero__logo { width: 72px; height: 72px; }
+  .hub-hero__lead { font-size: 14px; line-height: 20px; }
+  .app-card { padding: 16px; gap: 2px 16px; border-radius: 24px; }
+  .app-card__ico { width: 64px; height: 64px; }
+  .app-card strong { font-size: 20px; line-height: 28px; }
   .qat [data-cmd="redo"], .tbar-search { display: none; }
   .tbar-name__text { max-width: 40vw; }
   .tbar-name__state { display: none; }

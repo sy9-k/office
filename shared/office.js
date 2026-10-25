@@ -41,6 +41,10 @@
   function $(id) { return document.getElementById(id); }
   function esc(s) { return String(s === undefined || s === null ? "" : s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
   function copy(o) { return JSON.parse(JSON.stringify(o)); }
+  // アプリのロゴ（icons/ の PNG。アプリを選んでいないときは SK Hub Office のロゴ）
+  function logo(a) { return '<img class="app-logo" src="' + BASE + "icons/" + (a ? APP : "office") + '-logo.png" alt="" draggable="false">'; }
+  // アプリの絵（六角形だけ）と、ファイルの絵（紙に六角形のバッジ）。どちらも透明な PNG
+  function appImg(k, file) { return '<img class="app-img' + (file ? " app-img--file" : "") + '" src="' + BASE + "icons/" + k + (file ? "-file" : "-logo") + '.png" alt="" draggable="false">'; }
   function icon(name, fill) { return '<span class="msr' + (fill ? " msr--fill" : "") + '" aria-hidden="true">' + name + "</span>"; }
 
   // ---------- 保存（/office/shared/store.js）と設定 ----------
@@ -531,13 +535,13 @@
     if (!current && (view === "info" || view === "export")) view = "home";
     var rail = '<nav class="rail" aria-label="' + esc(t("メニュー")) + '">' +
       (current ? railBtn("data-back-edit", "arrow_back", t("戻る")) : "") +
-      '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + icon(a ? a.icon : "apps", true) + "</span><span>" + (a ? a.name : "Office") + "</span></a>" +
+      '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></a>" +
       railItem("home", "home", t("ホーム")) +
       (a ? railItem("new", "note_add", t("新規")) + railItem("open", "folder_open", t("開く")) : "") +
       (current ? railItem("info", "info", t("情報")) + railBtn("data-save-as", "save_as", t("コピーを保存")) + railItem("export", "ios_share", t("エクスポート")) +
         railBtn("data-print", "print", t("印刷")) + railBtn("data-close-file", "close", t("閉じる")) : "") +
       '<span class="rail__space"></span>' +
-      (a ? railItem("apps", "apps", t("アプリ"))
+      (a ? '<a class="rail__item rail__item--hub" href="' + BASE + '" title="' + esc(t("SK Hub Office のメインページ")) + '"><span class="rail__pill">' + appImg("office") + "</span><span>Office</span></a>"
          : '<a class="rail__item" href="' + SITE + '/products/office/"><span class="rail__pill">' + icon("info") + "</span><span>" + esc(t("紹介")) + "</span></a>") +
       (installEvt && !standalone ? railBtn("data-install", "install_desktop", t("インストール")) : "") +
       railItem("account", "account_circle", t("アカウント")) +
@@ -546,7 +550,7 @@
     var main = view === "new" ? viewNew() : view === "open" ? viewOpen() : view === "account" ? viewAccount() : view === "options" ? viewOptions() : view === "apps" ? viewApps()
       : view === "info" ? viewInfo() : view === "export" ? viewExport() : viewHome();
     // アプリとして入れたときだけ見える、ウィンドウのいちばん上の帯（is-wco）
-    var bar = '<header class="wco-bar"><span class="wco-bar__logo">' + icon(a ? a.icon : "apps", true) + '</span><span class="wco-bar__name">' + (a ? a.name : "SK Hub Office") + "</span>" +
+    var bar = '<header class="wco-bar"><span class="wco-bar__logo">' + logo(a) + '</span><span class="wco-bar__name">' + (a ? a.name : "SK Hub Office") + "</span>" +
       (a ? '<span class="wco-bar__sub">SK Hub Office</span>' : "") +
       '<span class="wco-bar__space"></span><button type="button" class="wco-search m3-state" data-cmd="find">' + icon("search") + "<span>" + esc(t("検索")) + "</span></button>" +
       '<span class="wco-bar__space"></span><button type="button" class="tbar-avatar" data-avatar-btn data-avatar aria-label="' + esc(t("アカウント")) + '" title="' + esc(t("アカウント")) + '"></button></header>';
@@ -574,17 +578,23 @@
     return n ? t("{greet}、{name} さん", { greet: g, name: n }) : g;
   }
   function viewHome() {
-    var a = APPS[APP], h = '<h1 class="start__h1">' + esc(greet()) + "</h1>" + banner(false);
-    if (a) {
+    var a = APPS[APP], h = a ? '<h1 class="start__h1">' + esc(greet()) + "</h1>" + banner(false) : "";
+    if (!a) {
+      // 入り口。アイコンとあいさつ、3 つのアプリ（大きなカード）、最近のファイル
+      var lead = { doc: t("文書を書く"), sheet: t("表で計算する"), slide: t("発表をつくる") };
+      h += '<section class="hub-hero"><div class="hub-hero__logo">' + logo(null) + '</div><div class="hub-hero__text">' +
+        '<p class="hub-hero__eyebrow">SK Hub Office</p><h1 class="start__h1">' + esc(greet()) + "</h1>" +
+        '<p class="hub-hero__lead">' + esc(t("書く・計算する・発表する。ぜんぶ、ブラウザで。")) + "</p></div></section>" + banner(false) +
+        '<section class="start__sec"><h2 class="start__h2">' + esc(t("はじめる")) + '</h2><div class="apps apps--cards">' +
+        ["doc", "sheet", "slide"].map(function (k) {
+          var x = APPS[k];
+          return '<a class="app-card app-card--' + k + ' m3-state" href="' + x.path + '"><span class="app-card__ico">' + appImg(k) + "</span>" +
+            '<span class="app-card__text"><strong>' + x.name + "</strong><small>" + esc(lead[k]) + '</small></span><span class="app-card__go">' + icon("add") + esc(x.blank) + "</span></a>";
+        }).join("") + "</div></section>";
+    } else {
       var tpls = (TEMPLATES[APP] || []).slice(0, 6);
       h += '<section class="start__sec"><div class="tpl-row">' + tpls.map(function (tp) { return tplCard(APP, tp); }).join("") + "</div>" +
         '<button type="button" class="more-link m3-state" data-view="new">' + esc(t("その他のテンプレート")) + icon("arrow_forward") + "</button></section>";
-    } else {
-      h += '<section class="start__sec"><h2 class="start__h2">' + esc(t("新しく作る")) + '</h2><div class="apps">' +
-        ["doc", "sheet", "slide"].map(function (k) {
-          var x = APPS[k];
-          return '<a class="app-tile app-tile--' + k + ' m3-state" href="' + x.path + '"><span class="app-tile__ico">' + icon(x.icon, true) + "</span><span><strong>" + x.name + "</strong><small>" + esc(x.blank) + "</small></span></a>";
-        }).join("") + "</div></section>";
     }
     return h + fileSection(true);
   }
@@ -622,7 +632,7 @@
   function viewInfo() {
     var f = current, a = APPS[APP];
     return '<h1 class="start__h1">' + esc(t("情報")) + "</h1>" +
-      '<section class="info-card"><span class="info-card__ico frow__ico" data-app="' + APP + '">' + icon(a.icon, true) + '</span><div class="info-card__text"><strong data-i18n-skip>' + esc(f.name) + "</strong><small>" +
+      '<section class="info-card"><span class="info-card__ico frow__ico" data-app="' + APP + '">' + appImg(APP, true) + '</span><div class="info-card__text"><strong data-i18n-skip>' + esc(f.name) + "</strong><small>" +
         esc(f.place === "drive" ? where(f) + (driveWho() ? "・" + driveWho() : "") : f.outside ? t("フォルダの外のファイル（直接保存しています）") : Store.state() === "ready" ? t("フォルダ「{name}」", { name: Store.folderName() }) : t("このブラウザ")) + "</small></div>" +
         '<button type="button" class="text-btn m3-state" data-rename>' + esc(t("名前を変更")) + "</button></section>" +
       '<dl class="props"><dt>' + esc(t("更新日時")) + "</dt><dd>" + esc(when(f.updated || Date.now())) + "</dd><dt>" + esc(t("作成日時")) + "</dt><dd>" + esc(when(f.created || Date.now())) + "</dd>" +
@@ -736,7 +746,7 @@
             '<p class="acct-product">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p>" +
             '<p class="acct-small">' + esc(t("この製品には以下が含まれます。")) + "</p>" +
             '<div class="acct-apps">' + ["doc", "sheet", "slide"].map(function (k) {
-              return '<a class="acct-apps__ico" data-app="' + k + '" href="' + APPS[k].path + '" title="' + APPS[k].name + '" aria-label="' + APPS[k].name + '">' + icon(APPS[k].icon, true) + "</a>";
+              return '<a class="acct-apps__ico" data-app="' + k + '" href="' + APPS[k].path + '" title="' + APPS[k].name + '" aria-label="' + APPS[k].name + '">' + appImg(k) + "</a>";
             }).join("") + "</div></section>" +
           '<div class="acct-tiles">' + tiles.map(function (x) {
             var tag = /^href/.test(x[4]) ? "a" : "button", off = !x[4];
@@ -850,7 +860,7 @@
         var a = APPS[f.app], pin = isPinned(f.id);
         return '<div class="frow" role="row" data-app="' + f.app + '">' +
           '<button type="button" class="frow__open m3-state" role="cell" data-open="' + esc(f.id) + '" data-open-app="' + f.app + '">' +
-            '<span class="frow__ico">' + icon(a.icon, true) + '</span><span class="frow__text"><span class="frow__name">' + esc(f.name) + '</span><span class="frow__meta">' + esc(a.name) + " ・ " + esc(where(f)) + '<span class="frow__when-sm"> ・ ' + esc(when(f.updated)) + "</span></span></span></button>" +
+            '<span class="frow__ico">' + appImg(f.app, true) + '</span><span class="frow__text"><span class="frow__name">' + esc(f.name) + '</span><span class="frow__meta">' + esc(a.name) + " ・ " + esc(where(f)) + '<span class="frow__when-sm"> ・ ' + esc(when(f.updated)) + "</span></span></span></button>" +
           '<span class="ftable__when" role="cell">' + esc(when(f.updated)) + "</span>" +
           '<span class="frow__act" role="cell">' +
             '<button type="button" class="icon-btn m3-state" data-pin="' + esc(f.id) + '" aria-pressed="' + pin + '" aria-label="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '" title="' + esc(pin ? t("ピン留めを外す") : t("ピン留め")) + '">' + icon("push_pin") + "</button>" +
@@ -1064,7 +1074,7 @@
     if (!a || !ed || !App) return;
     ed.innerHTML =
       '<header class="titlebar">' +
-        '<button type="button" class="tbar-logo" data-file aria-label="' + esc(t("ファイル")) + '" title="' + esc(t("ファイル")) + '">' + icon(a.icon, true) + "</button>" +
+        '<button type="button" class="tbar-logo" data-file aria-label="' + esc(t("ファイル")) + '" title="' + esc(t("ファイル")) + '">' + logo(a) + "</button>" +
         '<div class="qat" role="toolbar" aria-label="' + esc(t("クイック アクセス")) + '">' +
           '<button type="button" class="icon-btn m3-state" data-cmd="save" aria-label="' + esc(t("保存")) + '" title="' + esc(t("保存（Ctrl+S）")) + '">' + icon("save") + "</button>" +
           '<button type="button" class="icon-btn m3-state" data-cmd="undo" aria-label="' + esc(t("元に戻す")) + '" title="' + esc(t("元に戻す（Ctrl+Z）")) + '">' + icon("undo") + "</button>" +
@@ -1334,7 +1344,7 @@
       [t("見た目"), "SK Material（Material Design 3）"],
       [t("文字・アイコン"), "M PLUS 1・Material Symbols Rounded"]
     ];
-    return '<div class="about__head"><span class="about__logo">' + icon(a ? a.icon : "apps", true) + "</span><div>" +
+    return '<div class="about__head"><span class="about__logo">' + logo(a) + "</span><div>" +
         '<p class="about__name">' + (a ? "SK Hub Office " + a.name : "SK Hub Office") + "</p>" +
         '<p class="about__sub">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p></div></div>" +
       '<dl class="about__list">' + rows.map(function (x) { return "<dt>" + esc(x[0]) + "</dt><dd>" + esc(x[1]) + "</dd>"; }).join("") + "</dl>" +
@@ -1579,8 +1589,11 @@
   if (bridge) setTimeout(function () { syncAccount(); }, 600);
   Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); });
   // オフラインでも開けるように（/office/sw.js）
+  // 手元（localhost）では登録しない（直したところがキャッシュで見えなくなるため。前に入ったものは外す）
+  var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(function () { /* なくても使える */ });
+    if (LOCAL) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }).catch(function () {});
+    else navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(function () { /* なくても使える */ });
   }
   // アプリとして入れたあと、エクスプローラー・Finder で .skdoc などをダブルクリックしたとき（manifest の file_handlers）
   if ("launchQueue" in window && APPS[APP]) {
