@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SK Hub Office",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "jp.sk-hub.office",
   "build": {
     "frontendDist": "../dist"
@@ -13,8 +13,20 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4RjFGNzI1RUY0MzNBODQKUldTRU9rUHZKZmZ4cUFFLzZXbklHTzM3ejVUNnAzZGNpTTVSR0V4dkJUZlRLQ2JNTzFoOHFvOVQK",
+      "endpoints": ["https://office.sk-hub.jp/desktop/latest.json"],
+      "windows": { "installMode": "quiet" }
+    }
+  },
   "bundle": {
     "active": true,
+    "publisher": "SK Hub",
+    "copyright": "© 2026 SK Hub. All rights reserved.",
+    "shortDescription": "SK Hub Office",
+    "longDescription": "SK Hub Office — 文書（Doc）・表計算（Sheet）・スライド（Slide）のデスクトップ版",
+    "homepage": "https://sk-hub.jp/products/office/",
     "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",

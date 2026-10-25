@@ -1,0 +1,11 @@
+{
+  "version": "0.2.0",
+  "notes": "デスクトップ版 0.2.0\n・自動更新（起動して少したったときに調べます。「アカウント」の画面の「更新を確認」でも調べられます）\n・SK Hub Systems アカウントへのログインを、アプリの中の小さなウィンドウで行えるようにしました\n・Google ドライブのログインが 1 時間で切れなくなり、オフラインで保存した分は、つながったときに送ります\n・タイトルバーと「－ □ ×」を 1 つにしました\n・ファイルの種類ごとのアイコン、「開く」のダイアログ（Ctrl+O）、ウィンドウへのドロップで開く、右クリックのメニュー\n・Doc・Sheet・Slide を別々のアプリにしました（インストーラーは 1 つです）",
+  "pub_date": "2026-10-25T03:46:03.475Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTRU9rUHZKZmZ4cUVIeUEzU0E0bnkrZ0RYbVpEdVZQTnpGMnB3eGZKd0Z3VStQUm1XM2NMVksrQjZwR0w1KzlKUW1mT1BENXhMSmErSmIzRmVqTVh1LzZibUQ0elUrWUFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkyODk5OTYzCWZpbGU6U0stSHViLU9mZmljZS1TZXR1cC0wLjIuMC5leGUKaHQ2QmpUWDBvS044b2tmU1Q4VmQ4cXo3S2pPSFFxSlRaL0dMSVVKVit5QWJRR0hLUnNRMkQ0MGVaTUE5K0hJZCtOclNRT0szMlZtNjNjRDQwdEI5Q1E9PQo=",
+      "url": "https://github.com/sy9-k/office/releases/download/v0.2.0/SK-Hub-Office-Setup-0.2.0.exe"
+    }
+  }
+}

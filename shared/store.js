@@ -42,7 +42,13 @@
   }
   function baseName(fileName) { var a = appOf(fileName); return a ? fileName.slice(0, -EXT[a].length) : fileName; }
   function payload(f) { return JSON.stringify({ format: FORMAT, version: FILE_VERSION, app: f.app, tpl: f.tpl || "", created: f.created || Date.now(), data: f.data }); }
+  // 中身が空のファイル（Explorer の「新規作成」で作った 0 バイトのファイルなど）は、白紙のファイルとして開く
+  function blankOf(app) {
+    var list = window.OFFICE_TEMPLATES && window.OFFICE_TEMPLATES[app], b = list && (list.filter(function (x) { return x.cat === "blank"; })[0] || list[0]);
+    return b ? JSON.parse(JSON.stringify(b.data)) : null;
+  }
   function parse(text, fallbackApp) {
+    if (!String(text).trim() && fallbackApp && blankOf(fallbackApp)) return { app: fallbackApp, tpl: "blank", created: Date.now(), data: blankOf(fallbackApp) };
     var o = JSON.parse(text);
     if (!o || o.format !== FORMAT || !o.data) throw new Error("not-office");
     return { app: o.app || fallbackApp, tpl: o.tpl || "", created: o.created || Date.now(), data: o.data };

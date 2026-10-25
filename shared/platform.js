@@ -42,6 +42,16 @@
     googleToken: function (params, useStoredRefresh) { return Platform.invoke("google_token", { params: params, useStoredRefresh: !!useStoredRefresh }); },
     googleHasRefresh: function () { return Platform.invoke("google_has_refresh"); },
     googleSignout: function () { return Platform.invoke("google_signout"); },
+    // 「開く」のダイアログ（Windows 標準）。extra: 読み込める形式の拡張子（["docx", …]）。選んだファイルのパスの一覧（やめたら空）
+    pickOpenFiles: function (extra) { return Platform.invoke("pick_open_files", { extra: extra || [] }); },
+    // SK Hub Office のファイルを、合うアプリのページで、新しいウィンドウに開く
+    openPaths: function (paths) { return Platform.invoke("open_paths", { paths: paths }); },
+    // 読み込める形式（docx・html など）のファイルを File にして返す（アプリの読み込みに渡す）
+    readImportFile: function (path) {
+      return Platform.invoke("read_import_file", { path: path }).then(function (buf) {
+        return new File([buf], String(path).split(/[\\/]/).pop());
+      });
+    },
     // PC に入っているフォントの名前（五十音と ABC 順）
     systemFonts: function () { return Platform.invoke("system_fonts"); },
     // 印刷用の見た目にしたあとの画面を、PDF にして保存する。css は @page のある印刷用の CSS（用紙の大きさを読む）

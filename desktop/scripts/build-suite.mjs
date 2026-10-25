@@ -13,6 +13,13 @@ const stage = path.join(desktop, "stage");
 const outDir = path.join(desktop, "dist-installer");
 const APPS = [["doc", "Doc"], ["sheet", "Sheet"], ["slide", "Slide"]];
 const version = JSON.parse(readFileSync(path.join(tauriDir, "tauri.conf.json"), "utf8")).version;
+// 版は tauri.conf.json が元（インストーラー・自動更新・アプリの表示）。Cargo.toml と package.json がちがっていたら、作らない
+const cargoVersion = /^version\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(tauriDir, "Cargo.toml"), "utf8"))?.[1];
+const npmVersion = JSON.parse(readFileSync(path.join(desktop, "package.json"), "utf8")).version;
+if (cargoVersion !== version || npmVersion !== version) {
+  console.error(`版がそろっていません: tauri.conf.json=${version} Cargo.toml=${cargoVersion} package.json=${npmVersion}`);
+  process.exit(1);
+}
 const run = (cmd, args, opts = {}) => {
   const r = spawnSync(cmd, args, { stdio: "inherit", shell: process.platform === "win32", cwd: desktop, ...opts });
   if (r.status !== 0) { console.error(`失敗: ${cmd} ${args.join(" ")}`); process.exit(r.status || 1); }
@@ -28,6 +35,7 @@ if (!process.argv.includes("--skip-build")) {
 }
 // ファイルの種類のアイコン（installer/icons/*-file.ico。icons/src/sk-*-file.png から tauri icon で作ったもの）
 cpSync(path.join(desktop, "installer", "icons"), path.join(stage, "icons"), { recursive: true });
+copyFileSync(path.join(tauriDir, "icons", "icon.ico"), path.join(stage, "icons", "suite.ico")); // 「アプリと機能」に出す SK Hub Office のアイコン
 for (const [, name] of APPS) if (!existsSync(path.join(stage, `${name}.exe`))) { console.error(`stage/${name}.exe がありません（--skip-build を外して作ってください）`); process.exit(1); }
 
 const makensis = path.join(process.env.LOCALAPPDATA || "", "tauri", "NSIS", "makensis.exe");
@@ -37,8 +45,9 @@ if (!existsSync(makensis)) { console.error("makensis が見つかりません。
 const src = readFileSync(path.join(desktop, "installer", "suite.nsi"), "utf8").replace(/^﻿/, "");
 const nsi = path.join(stage, "suite.nsi");
 writeFileSync(nsi, "﻿" + src, "utf8");
-rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, `SK-Hub-Office-Setup-${version}.exe`);
+// 前の版のインストーラーが開いている（実行中）こともあるので、フォルダごとは消さず、この版のものだけを作りなおす
+for (const f of [outFile, outFile + ".sig", path.join(outDir, "latest.json")]) rmSync(f, { force: true });
 run(makensis, ["/V2", `/DVERSION=${version}`, `/DSTAGE=${stage}`, `/DOUTFILE=${outFile}`, `/DICON=${path.join(tauriDir, "icons", "icon.ico")}`, nsi]);
 console.log("できました: " + outFile);

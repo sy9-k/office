@@ -2,6 +2,7 @@
   "productName": "SK Hub Office Doc",
   "identifier": "jp.sk-hub.office.doc",
   "bundle": {
+    "shortDescription": "SK Hub Office Doc（文書）",
     "icon": ["icons/doc/32x32.png", "icons/doc/128x128.png", "icons/doc/128x128@2x.png", "icons/doc/icon.ico"],
     "fileAssociations": [
       { "ext": ["skdoc"], "name": "SK Hub Office Doc", "description": "SK Hub Office 文書", "mimeType": "application/x-sk-hub-office-doc", "role": "Editor" }

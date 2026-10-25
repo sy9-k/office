@@ -18,4 +18,6 @@ for (const item of ITEMS) {
     filter: (src) => !SKIP.some((re) => re.test(src)),
   });
 }
+// 起動画面（デスクトップ版だけ。Web 版にはない）
+await cp(path.join(root, "desktop", "splash", "splash.html"), path.join(dist, "splash.html"));
 console.log("desktop/dist ← " + ITEMS.join(", "));

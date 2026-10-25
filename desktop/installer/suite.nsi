@@ -8,6 +8,9 @@ Unicode true
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 
+!insertmacro GetTime
+!insertmacro GetSize
+
 !define PRODUCT "SK Hub Office"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\SKHubOffice"
 
@@ -46,7 +49,13 @@ VIAddVersionKey /LANG=1041 "LegalCopyright" "SK Hub"
 ;   ファイルの種類は HKCU\Software\Classes に書く（ユーザー単位）。同じ拡張子をほかのアプリが持っていても、ここは上書きしない設計にはしない（SK Hub Office 専用の拡張子）
 !macro InstallApp APP EXT PROGID TITLE DESC
   SetOutPath "$INSTDIR"
+  ; 使っている最中のアプリ（実行中のファイルは上書きできない）は、名前を変えて残してから、新しいものを置く（更新のとき、アプリを閉じなくても入れかえられる）
+  ${If} ${FileExists} "$INSTDIR\SK Hub Office ${APP}.exe"
+    Delete "$INSTDIR\SK Hub Office ${APP}.exe.old"
+    Rename "$INSTDIR\SK Hub Office ${APP}.exe" "$INSTDIR\SK Hub Office ${APP}.exe.old"
+  ${EndIf}
   File "/oname=SK Hub Office ${APP}.exe" "${STAGE}\${APP}.exe"
+  Delete "$INSTDIR\SK Hub Office ${APP}.exe.old"
   ; ファイル（.skdoc など）のアイコンは、アプリのアイコンではなく、紙に六角形のバッジの専用の絵（icons/src/sk-*-file.png から作った .ico）
   SetOutPath "$INSTDIR\icons"
   File "/oname=${EXT}.ico" "${STAGE}\icons\${APP}-file.ico"
@@ -54,6 +63,10 @@ VIAddVersionKey /LANG=1041 "LegalCopyright" "SK Hub"
   CreateShortCut "$SMPROGRAMS\SK Hub Office ${APP}.lnk" "$INSTDIR\SK Hub Office ${APP}.exe" "" "$INSTDIR\SK Hub Office ${APP}.exe" 0
   WriteRegStr HKCU "Software\Classes\.${EXT}" "" "${PROGID}"
   WriteRegStr HKCU "Software\Classes\.${EXT}" "Content Type" "application/x-sk-hub-office-${EXT}"
+  ; エクスプローラーの右クリック「新規作成」に「${DESC}」を出す（0 バイトのファイルができる。アプリが、白紙のファイルとして開く）
+  WriteRegStr HKCU "Software\Classes\.${EXT}\ShellNew" "NullFile" ""
+  ; 右クリックの「開く」の名前と、アイコン
+  WriteRegStr HKCU "Software\Classes\${PROGID}\shell" "" "open"
   WriteRegStr HKCU "Software\Classes\${PROGID}" "" "${DESC}"
   WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" '$INSTDIR\icons\${EXT}.ico'
   WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open" "FriendlyAppName" "${TITLE}"
@@ -63,6 +76,7 @@ VIAddVersionKey /LANG=1041 "LegalCopyright" "SK Hub"
 
 !macro UninstallApp APP EXT PROGID
   Delete "$INSTDIR\SK Hub Office ${APP}.exe"
+  Delete "$INSTDIR\SK Hub Office ${APP}.exe.old"
   Delete "$INSTDIR\icons\${EXT}.ico"
   Delete "$SMPROGRAMS\SK Hub Office ${APP}.lnk"
   DeleteRegKey HKCU "Software\Classes\${PROGID}"
@@ -102,7 +116,15 @@ Section "-共通" SecCore
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"
   WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "SK Hub"
   WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
-  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\Uninstall.exe"
+  ; 「アプリと機能」に出る情報（名前・版・発行元・アイコン・場所・サイト・大きさ・日付）
+  SetOutPath "$INSTDIR\icons"
+  File "/oname=suite.ico" "${STAGE}\icons\suite.ico"
+  SetOutPath "$INSTDIR"
+  WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\icons\suite.ico"
+  WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://sk-hub.jp/products/office/"
+  WriteRegStr HKCU "${UNINST_KEY}" "HelpLink" "https://sk-hub.jp/support/"
+  ${GetTime} "" "L" $0 $1 $2 $3 $4 $5 $6
+  WriteRegStr HKCU "${UNINST_KEY}" "InstallDate" "$2$1$0"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
@@ -121,9 +143,49 @@ Section "Slide（スライド）" SecSlide
 SectionEnd
 
 Section "-仕上げ"
+  ; 「アプリと機能」に出す、入れたものの大きさ（KB）
+  ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
+  IntFmt $0 "0x%08X" $0
+  WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
   ; ファイルの関連付けを、エクスプローラーにすぐ知らせる
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 SectionEnd
+
+; ---- 前に入れたアプリだけを選んだ状態にする（更新・入れなおしで、入れていないアプリが増えないように。更新は /S で静かに実行される） ----
+Function .onInit
+  ReadRegStr $0 HKCU "Software\SKHubOffice" "InstallDir"
+  ${If} $0 != ""
+    ReadRegStr $1 HKCU "Software\SKHubOffice\Apps" "Doc"
+    ${If} $1 == ""
+      SectionSetFlags ${SecDoc} 0
+    ${EndIf}
+    ReadRegStr $1 HKCU "Software\SKHubOffice\Apps" "Sheet"
+    ${If} $1 == ""
+      SectionSetFlags ${SecSheet} 0
+    ${EndIf}
+    ReadRegStr $1 HKCU "Software\SKHubOffice\Apps" "Slide"
+    ${If} $1 == ""
+      SectionSetFlags ${SecSlide} 0
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+; ---- 更新（静かな実行）が終わったら、更新を始めたアプリをもう一度開く（アプリが sk-hub-office-relaunch.txt に実行ファイルの場所を書いておく。入れた場所の中のものだけ） ----
+Function .onInstSuccess
+  ${If} ${Silent}
+  ${AndIf} ${FileExists} "$TEMP\sk-hub-office-relaunch.txt"
+    FileOpen $0 "$TEMP\sk-hub-office-relaunch.txt" r
+    FileRead $0 $1
+    FileClose $0
+    Delete "$TEMP\sk-hub-office-relaunch.txt"
+    StrLen $2 "$INSTDIR\"
+    StrCpy $3 $1 $2
+    ${If} $3 == "$INSTDIR\"
+    ${AndIf} ${FileExists} "$1"
+      Exec '"$1"'
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
   !insertmacro MUI_DESCRIPTION_TEXT ${SecDoc} "文書を書くアプリ（.skdoc）"
@@ -136,6 +198,7 @@ Section "Uninstall"
   !insertmacro UninstallApp "Sheet" "sksheet" "SKHubOffice.Sheet"
   !insertmacro UninstallApp "Slide" "skslide" "SKHubOffice.Slide"
   Delete "$INSTDIR\Uninstall.exe"
+  Delete "$INSTDIR\icons\suite.ico"
   RMDir "$INSTDIR\icons"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"

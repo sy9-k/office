@@ -82,13 +82,73 @@ fn read_file(path: &Path) -> Result<Content, String> {
     Ok(Content { text, modified: modified_ms(&meta) })
 }
 
+// 版は tauri.conf.json の version（自動更新・インストーラーと同じもの）
 #[tauri::command]
-fn app_info() -> serde_json::Value {
+fn app_info(app: tauri::AppHandle) -> serde_json::Value {
     serde_json::json!({
         "kind": "desktop",
-        "version": env!("CARGO_PKG_VERSION"),
+        "app": app_kind(&app),
+        "version": app.package_info().version.to_string(),
         "os": std::env::consts::OS,
     })
+}
+
+// ---------- ファイルを開く ----------
+// 「開く」のダイアログ（Windows 標準）。SK Hub Office のファイルと、アプリが読み込める形式（extra: "docx" など）を選べる。複数選べる。やめたら空
+#[tauri::command]
+async fn pick_open_files(app: tauri::AppHandle, extra: Option<Vec<String>>) -> Result<Vec<String>, String> {
+    let extra: Vec<String> = extra
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.trim_start_matches('.').to_lowercase())
+        .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .collect();
+    let mut dialog = app.dialog().file().set_title("ファイルを開く").add_filter("SK Hub Office のファイル", &["skdoc", "sksheet", "skslide"]);
+    if !extra.is_empty() {
+        let mut all: Vec<&str> = vec!["skdoc", "sksheet", "skslide"];
+        all.extend(extra.iter().map(|s| s.as_str()));
+        dialog = dialog.add_filter("すべての対応形式", &all);
+        dialog = dialog.add_filter("読み込める形式", &extra.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    }
+    let picked = dialog.blocking_pick_files();
+    let mut out = Vec::new();
+    for p in picked.unwrap_or_default() {
+        out.push(p.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned());
+    }
+    Ok(out)
+}
+
+// 読み込める形式のファイル（docx・html など。SK Hub Office のファイルではないもの）の中身。画面が File にして、アプリの読み込みに渡す
+#[tauri::command]
+async fn read_import_file(path: String) -> Result<tauri::ipc::Response, String> {
+    const ALLOWED: [&str; 12] = ["docx", "doc", "html", "htm", "md", "markdown", "txt", "xlsx", "xlsm", "csv", "tsv", "pptx"];
+    let p = Path::new(&path);
+    let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+    if !p.is_absolute() || !ALLOWED.contains(&ext.as_str()) {
+        return Err("bad-path".into());
+    }
+    let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > 200 * 1024 * 1024 {
+        return Err("too-large".into());
+    }
+    Ok(tauri::ipc::Response::new(std::fs::read(p).map_err(|e| e.to_string())?))
+}
+
+// ファイル（.skdoc など）を、そのファイルに合うアプリのページで、新しいウィンドウに開く
+#[tauri::command]
+async fn open_paths(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    for f in office_files(paths) {
+        open_window(&app, page_of_file(&f), None, Some(&f))?;
+    }
+    Ok(())
+}
+
+// 更新のインストーラー（静かに実行される）が終わったあとに、このアプリをもう一度開けるように、実行ファイルの場所を一時ファイルに書いておく
+//   インストーラー（installer/suite.nsi）が読んで、インストール先の中のものだけを開く
+#[tauri::command]
+fn mark_relaunch() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    std::fs::write(std::env::temp_dir().join("sk-hub-office-relaunch.txt"), exe.to_string_lossy().as_bytes()).map_err(|e| e.to_string())
 }
 
 // 最初に使う保存先（ドキュメント\SK Hub Office。なければ作る）
@@ -266,6 +326,11 @@ fn office_files<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
 
 // page: 開くページ（許可したものだけ）。hash: 開くファイルの指定（"f=…"）。open: フォルダの外のファイルのパス
 fn open_window(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Option<&str>) -> Result<(), String> {
+    open_window_with(app, page, hash, open, false)
+}
+
+// hidden: 起動画面を出しているあいだは、本体のウィンドウを隠しておき、準備ができたら（app_ready）出す
+fn open_window_with(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Option<&str>, hidden: bool) -> Result<(), String> {
     const PAGES: [&str; 4] = ["index.html", "doc/index.html", "sheet/index.html", "slide/index.html"];
     if !PAGES.contains(&page) {
         return Err(format!("bad-page: {page}"));
@@ -283,27 +348,108 @@ fn open_window(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Opt
         .title(app_title(kind))
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 560.0)
+        .visible(!hidden)
         // Windows の標準の枠・タイトルバーは使わず、Office のタイトルバーに「－ □ ×」を入れる（shared/platform.js・office.css の .win-ctrl）
         .decorations(false)
+        // ウィンドウへのドラッグ＆ドロップは、画面（ブラウザの機能）にそのまま任せる。Tauri の既定のままだと、スライドの並べかえや画像の挿入などの、ページの中のドラッグが動かなくなる
+        .disable_drag_drop_handler()
         .initialization_script(script)
         .build()
         .map_err(|e| e.to_string())?;
     Ok(())
 }
 
-fn open_files_or_hub(app: &tauri::AppHandle, files: Vec<String>) {
+// ---------- 起動画面（MS Office の起動のときのような小さな画面） ----------
+//   アプリを開いた直後に、枠なしの小さなウィンドウ（desktop/splash/splash.html。アプリごとの色と名前）を出し、
+//   本体のウィンドウは隠したまま読み込む。本体の準備ができたら（画面が app_ready を呼ぶ）本体を出して、起動画面を閉じる
+//   早く終わりすぎてちらつかないよう、起動画面は少なくとも SPLASH_MIN_MS は出しておく。何かでうまくいかなくても、SPLASH_MAX_SECS 後には本体を出す
+const SPLASH_MIN_MS: u64 = 1500;
+const SPLASH_MAX_SECS: u64 = 12;
+static SPLASH_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn show_splash(app: &tauri::AppHandle) -> bool {
+    let kind = app_kind(app);
+    let script = format!("window.__SK_APP__={};", serde_json::to_string(kind).unwrap_or_else(|_| "\"hub\"".into()));
+    let built = tauri::WebviewWindowBuilder::new(app, "splash", tauri::WebviewUrl::App("splash.html".into()))
+        .title(app_title(kind))
+        .inner_size(560.0, 300.0)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .decorations(false)
+        .shadow(true)
+        .always_on_top(true)
+        .skip_taskbar(false)
+        .center()
+        .disable_drag_drop_handler()
+        .initialization_script(script)
+        .build();
+    if built.is_err() {
+        return false;
+    }
+    if let Ok(mut at) = SPLASH_AT.lock() {
+        *at = Some(std::time::Instant::now());
+    }
+    // 何かでうまくいかないときの保険
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(SPLASH_MAX_SECS));
+        end_splash(&handle);
+    });
+    true
+}
+
+// 隠している本体のウィンドウを出して、起動画面を閉じる
+fn end_splash(app: &tauri::AppHandle) {
+    let active = SPLASH_AT.lock().map(|mut at| at.take().is_some()).unwrap_or(false);
+    if !active {
+        return;
+    }
+    for (label, w) in app.webview_windows() {
+        if label != "splash" && !w.is_visible().unwrap_or(true) {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }
+    if let Some(s) = app.get_webview_window("splash") {
+        let _ = s.close();
+    }
+}
+
+// 画面の準備ができた（最初の表示が終わった）。起動画面を出していたら、少なくとも SPLASH_MIN_MS たってから、本体に切りかえる
+#[tauri::command]
+async fn app_ready(app: tauri::AppHandle) {
+    let started = SPLASH_AT.lock().ok().and_then(|at| *at);
+    if let Some(t0) = started {
+        let min = std::time::Duration::from_millis(SPLASH_MIN_MS);
+        if let Some(rest) = min.checked_sub(t0.elapsed()) {
+            tokio_sleep(rest).await;
+        }
+        end_splash(&app);
+    }
+}
+
+async fn tokio_sleep(d: std::time::Duration) {
+    let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
+}
+
+// startup: アプリを開いた直後（起動画面を出して、本体は隠したまま読み込む）。すでに起動しているところに、あとから開かれたときは false
+fn open_files_or_hub(app: &tauri::AppHandle, files: Vec<String>, startup: bool) {
+    let hidden = startup && show_splash(app);
     if files.is_empty() {
         // すでに開いているウィンドウがあれば前に出し、なければ入り口を開く
-        if let Some(w) = app.webview_windows().values().next() {
-            let _ = w.unminimize();
-            let _ = w.set_focus();
-        } else {
-            let _ = open_window(app, home_page(app_kind(app)), None, None);
+        if !startup {
+            if let Some(w) = app.webview_windows().values().next() {
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+                return;
+            }
         }
+        let _ = open_window_with(app, home_page(app_kind(app)), None, None, hidden);
         return;
     }
     for f in files {
-        let _ = open_window(app, page_of_file(&f), None, Some(&f));
+        let _ = open_window_with(app, page_of_file(&f), None, Some(&f), hidden);
     }
 }
 
@@ -642,16 +788,22 @@ pub fn run() {
     tauri::Builder::default()
         // すでに起動しているときに、また起動された（別のファイルをダブルクリックした）ら、いまの SK Hub Office で開く
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            open_files_or_hub(app, office_files(argv.into_iter().skip(1)));
+            open_files_or_hub(app, office_files(argv.into_iter().skip(1)), false);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
-            open_files_or_hub(app.handle(), office_files(std::env::args().skip(1)));
+            open_files_or_hub(app.handle(), office_files(std::env::args().skip(1)), true);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             new_window,
+            app_ready,
+            pick_open_files,
+            read_import_file,
+            open_paths,
+            mark_relaunch,
             shared_all,
             shared_set,
             external_login,
