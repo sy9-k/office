@@ -1,35 +1,43 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "SK Hub Office",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "jp.sk-hub.office",
   "build": {
     "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "label": "main",
-        "title": "SK Hub Office",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 560
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE4RjFGNzI1RUY0MzNBODQKUldTRU9rUHZKZmZ4cUFFLzZXbklHTzM3ejVUNnAzZGNpTTVSR0V4dkJUZlRLQ2JNTzFoOHFvOVQK",
+      "endpoints": ["https://office.sk-hub.jp/desktop/latest.json"],
+      "windows": { "installMode": "quiet" }
+    }
+  },
   "bundle": {
     "active": true,
+    "publisher": "SK Hub",
+    "copyright": "© 2026 SK Hub. All rights reserved.",
+    "shortDescription": "SK Hub Office",
+    "longDescription": "SK Hub Office — 文書（Doc）・表計算（Sheet）・スライド（Slide）のデスクトップ版",
+    "homepage": "https://sk-hub.jp/products/office/",
     "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      { "ext": ["skdoc"], "name": "SK Hub Office Doc", "description": "SK Hub Office 文書", "mimeType": "application/x-sk-hub-office-doc", "role": "Editor" },
+      { "ext": ["sksheet"], "name": "SK Hub Office Sheet", "description": "SK Hub Office 表計算", "mimeType": "application/x-sk-hub-office-sheet", "role": "Editor" },
+      { "ext": ["skslide"], "name": "SK Hub Office Slide", "description": "SK Hub Office スライド", "mimeType": "application/x-sk-hub-office-slide", "role": "Editor" }
     ],
     "windows": {
       "nsis": {

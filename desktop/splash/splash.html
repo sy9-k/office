@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SK Hub Office</title>
+<!-- 起動画面（MS Office の起動のときのような小さな画面）。アプリを開いた直後に、画面の本体より先に出る。本体の準備ができると、閉じる（desktop/src-tauri/src/lib.rs の app_ready）
+     どのアプリか（Doc・Sheet・Slide）は、Rust が window.__SK_APP__ に入れる。色は各アプリの manifest の theme_color -->
+<style>
+  :root { --c1: #2563eb; --c2: #1e3a8a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; cursor: default; user-select: none; -webkit-user-select: none; }
+  body {
+    font-family: "Segoe UI Variable Text", "Segoe UI", "Yu Gothic UI", "Meiryo UI", sans-serif; color: #fff;
+    background: radial-gradient(120% 140% at 15% 0%, var(--c1) 0%, var(--c2) 100%);
+    display: grid; grid-template-columns: 190px 1fr; align-items: center; padding: 0 36px 0 30px; gap: 8px;
+  }
+  .logo { width: 150px; height: 150px; filter: drop-shadow(0 10px 22px rgba(0, 0, 0, .35)); animation: pop .7s cubic-bezier(.2, .8, .2, 1) both; }
+  .text { animation: slide .7s .08s cubic-bezier(.2, .8, .2, 1) both; }
+  .brand { font-size: 13px; letter-spacing: .16em; opacity: .85; font-weight: 600; }
+  .name { font-size: 54px; line-height: 1.05; font-weight: 700; letter-spacing: -.01em; margin: 6px 0 2px; }
+  .sub { font-size: 15px; opacity: .9; }
+  .status { position: absolute; left: 30px; right: 30px; bottom: 26px; display: flex; justify-content: space-between; font-size: 12px; opacity: .85; }
+  .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, .22); overflow: hidden; }
+  .bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 34%; background: #fff; border-radius: 2px; animation: run 1.3s ease-in-out infinite; }
+  @keyframes run { 0% { left: -34%; } 100% { left: 100%; } }
+  @keyframes pop { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
+  @keyframes slide { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .logo, .text, .bar::after { animation: none; } .bar::after { left: 0; width: 100%; opacity: .6; } }
+</style>
+</head>
+<body>
+  <img class="logo" id="logo" src="icons/office-logo.png" alt="" draggable="false">
+  <div class="text">
+    <div class="brand">SK HUB OFFICE</div>
+    <div class="name" id="name">Office</div>
+    <div class="sub" id="sub"></div>
+  </div>
+  <div class="status"><span id="msg">起動しています…</span><span id="ver"></span></div>
+  <div class="bar"></div>
+<script>
+  (function () {
+    var APPS = {
+      doc: { name: "Doc", sub: "文書", c1: "#2563eb", c2: "#1e3a8a" },
+      sheet: { name: "Sheet", sub: "表計算", c1: "#16a34a", c2: "#14532d" },
+      slide: { name: "Slide", sub: "スライド", c1: "#d9a000", c2: "#8a5a00" }
+    };
+    var k = window.__SK_APP__, a = APPS[k];
+    if (a) {
+      document.getElementById("name").textContent = a.name;
+      document.getElementById("sub").textContent = a.sub;
+      document.getElementById("logo").src = "icons/" + k + "-logo.png";
+      document.documentElement.style.setProperty("--c1", a.c1);
+      document.documentElement.style.setProperty("--c2", a.c2);
+    } else {
+      document.getElementById("sub").textContent = "文書・表計算・スライド";
+    }
+    var T = window.__TAURI__;
+    if (T && T.core) T.core.invoke("app_info").then(function (i) { document.getElementById("ver").textContent = "バージョン " + i.version; }, function () {});
+  })();
+</script>
+</body>
+</html>

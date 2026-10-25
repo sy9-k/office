@@ -29,7 +29,7 @@
   // Office のいちばん上のパス。office.sk-hub.jp では "/"、sk-hub.jp（手元のサーバー）では "/office/"（このファイルの 1 つ上）
   var BASE = (function () { var s = document.currentScript; try { return s ? new URL("..", s.src).pathname : "/office/"; } catch (e) { return "/office/"; } })();
   // サイト（sk-hub.jp）のページへのリンク。office.sk-hub.jp からは sk-hub.jp を付ける
-  var SITE = /(^|\.)sk-hub\.jp$/.test(location.hostname) && !/^(www\.)?sk-hub\.jp$/.test(location.hostname) ? "https://sk-hub.jp" : "";
+  var SITE = (/(^|\.)sk-hub\.jp$/.test(location.hostname) && !/^(www\.)?sk-hub\.jp$/.test(location.hostname)) || (window.OfficePlatform && OfficePlatform.isDesktop) ? "https://sk-hub.jp" : "";
 
   var APPS = {
     doc: { name: "Doc", icon: "description", path: BASE + "doc/", untitled: t("無題の文書"), blank: t("白紙の文書") },
@@ -49,6 +49,7 @@
 
   // ---------- 保存（/office/shared/store.js）と設定 ----------
   var Store = window.OfficeStore;
+  var DESKTOP = !!(window.OfficePlatform && OfficePlatform.isDesktop); // デスクトップ版（shared/platform.js）
   var VERSION = "0.3";
   // SK Hub Office の設定（このブラウザの localStorage の sk_office_settings）
   //   { theme: "auto|light|dark", motion: "auto|reduce", autosave: true|false, user: "名前", pinned: [ファイルの ID] }
@@ -176,8 +177,9 @@
   //   エディタは、タイトルバー（アプリのアイコン・保存・ファイル名・検索・共有・アカウント）をそのまま帯にする。
   //   スタート画面は、同じ色の帯（.wco-bar）を出す。見た目は office.css。タイトルバーの右の「∧」で、ふつうのタイトルバーに戻せる
   var wco = navigator.windowControlsOverlay;
-  function syncWco() { root.classList.toggle("is-wco", !!(wco && wco.visible)); }
-  if (wco) { syncWco(); wco.addEventListener("geometrychange", syncWco); }
+  // デスクトップ版は、標準のタイトルバーを使わず、いつも帯を Office のタイトルバーにする（右の「－ □ ×」は platform.js・office.css の .win-ctrl）
+  function syncWco() { root.classList.toggle("is-wco", DESKTOP || !!(wco && wco.visible)); root.classList.toggle("is-native-bar", DESKTOP); }
+  if (wco || DESKTOP) { syncWco(); if (wco) wco.addEventListener("geometrychange", syncWco); }
   // ウィンドウのボタン（閉じるなど）とアドレスバーの色を、アプリの色（タイトルバーの色）にそろえる
   function syncThemeColor() {
     var meta = document.querySelector('meta[name="theme-color"]');
@@ -221,6 +223,96 @@
       return ok;
     }, function (e) { if (window.console) console.error(e); notify(t("Google ドライブにつなげませんでした。インターネットのつながりを確かめてください")); return false; });
   }
+  // あとで送る分が送れたとき（つながったとき）
+  Store.onFlush = function (n) {
+    notify(t("Google ドライブに {n} 件を送りました", { n: n }));
+    if (current && current.queued && Store.pending() === 0) { current.queued = false; setStatus(t("保存済み")); }
+  };
+
+  // ---------- SK Hub Systems アカウント（デスクトップ版: いつものブラウザでログイン） ----------
+  //   sk-hub.jp/account/?desktop=ポート&state=… でログインすると、ブラウザが 127.0.0.1:ポート に戻ってきて、ログイン中かのヒント（skhub_account）を渡す
+  //   Web 版は、いままでどおり sk-hub.jp のログインのページに移る（loginUrl）
+  function desktopLogin() {
+    var P = window.OfficePlatform, a = new Uint8Array(18), st = "";
+    crypto.getRandomValues(a);
+    a.forEach(function (b) { st += String.fromCharCode(b); });
+    st = btoa(st).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    // アプリの中の小さなウィンドウでログインする（Google・GitHub・Microsoft のボタンだけは、ページが、いつものブラウザに切りかえる）
+    return P.externalLogin(SITE + "/account/?desktop={port}&state=" + st, 600, true).then(function (r) {
+      if (!r || r.state !== st || !r.hint) throw new Error("login");
+      var b64 = r.hint.replace(/-/g, "+").replace(/_/g, "/"), bin = atob(b64 + "===".slice((b64.length + 3) % 4)), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var text = new TextDecoder().decode(bytes), o = JSON.parse(text);
+      if (!o || typeof o !== "object") throw new Error("login");
+      localStorage.setItem("skhub_account", text);
+      fillAvatars();
+      if ($("home") && !$("home").hidden) renderStart();
+      notify(t("ログインしました"));
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      notify(t("ログインできませんでした"));
+    });
+  }
+  // このアプリのログインの記録を外す（ブラウザ側のログインは、アカウントの管理のページで外せる）
+  function desktopLogout() {
+    try { localStorage.removeItem("skhub_account"); } catch (e) { /* なし */ }
+    fillAvatars();
+    if ($("home") && !$("home").hidden) renderStart();
+    notify(t("このアプリのログインを外しました"));
+  }
+  // ---------- 自動更新（デスクトップ版。desktop/ の updater。更新の情報は office.sk-hub.jp/desktop/latest.json） ----------
+  //   起動して少したったとき（1 日に 1 回まで）に新しい版を調べ、あれば知らせる。「アカウント」の画面の「更新を確認」でも調べられる
+  //   更新すると、このアプリを閉じて、インストーラー（Doc・Sheet・Slide をまとめて）を静かに実行し、終わったら、このアプリをもう一度開く
+  //   ほかのアプリが開いたままでも更新できる（前の版のファイルは名前を変えて残し、閉じて開き直すと新しい版になる）
+  var desktopVersion = "", updating = false, UPDATE_KEY = "sk_office_update_check";
+  if (DESKTOP) OfficePlatform.invoke("app_info").then(function (i) { desktopVersion = i.version; }, function () {});
+  function checkUpdate(manual) {
+    var U = window.__TAURI__ && window.__TAURI__.updater;
+    if (!DESKTOP || !U || updating) return Promise.resolve();
+    try { localStorage.setItem(UPDATE_KEY, String(Date.now())); } catch (e) { /* なし */ }
+    return U.check().then(function (up) {
+      if (!up) { if (manual) notify(t("最新の版です")); return; }
+      if (!manual && (!$("home") || $("home").hidden)) { notify(t("新しい版 {v} があります。「アカウント」の画面の「更新を確認」から更新できます", { v: up.version })); return; }
+      return M3.confirm({
+        title: t("新しい版 {v} があります", { v: up.version }),
+        text: t("更新すると、このアプリをいったん閉じて、Doc・Sheet・Slide を新しい版に入れかえます。終わると、このアプリがもう一度開きます。ほかのアプリは、開いたままでも更新できます（閉じて開き直すと、新しい版になります）。"),
+        ok: t("更新する"), icon: "system_update"
+      }).then(function (ok) {
+        if (!ok) return;
+        updating = true;
+        var total = 0, got = 0;
+        notify(t("更新をダウンロードしています…"));
+        return (dirty ? saveNow() : Promise.resolve()).then(function () { return OfficePlatform.invoke("mark_relaunch"); }).then(function () {
+          return up.downloadAndInstall(function (ev) {
+            if (ev.event === "Started") total = (ev.data && ev.data.contentLength) || 0;
+            else if (ev.event === "Progress") { got += ev.data.chunkLength || 0; if (total) setStatus(t("更新をダウンロード中 {p}%", { p: Math.round(got * 100 / total) })); }
+          });
+        }).catch(function (e) { updating = false; throw e; });
+      });
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      if (manual) notify(t("更新を確認できませんでした。インターネットのつながりを確かめてください"));
+    });
+  }
+  if (DESKTOP) setTimeout(function () {
+    var last = 0; try { last = +localStorage.getItem(UPDATE_KEY) || 0; } catch (e) { /* なし */ }
+    if (Date.now() - last > 24 * 60 * 60 * 1000) checkUpdate(false);
+  }, 15000);
+  // デスクトップ版: 外のサイトのリンクは、画面の中ではなく、いつものブラウザで開く。ほかのアプリ（Doc・Sheet・Slide）へのリンクは、新しいウィンドウで開く
+  //   （アプリごとに別々に入れているので、このウィンドウを別のアプリに変えない）
+  if (DESKTOP) document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !/^https?:/i.test(a.href)) return;
+    if (a.origin === location.origin) {
+      var m = /^\/(doc|sheet|slide)\//.exec(a.pathname);
+      if (m && m[1] !== APP && OfficePlatform.app && OfficePlatform.app !== "hub") { e.preventDefault(); OfficePlatform.openWindow(m[1]); }
+      return;
+    }
+    e.preventDefault();
+    OfficePlatform.openExternal(a.href).catch(function () { notify(t("リンクを開けませんでした")); });
+  });
+  // ほかのアプリでログインやログアウトをしたとき（前に出したときに取りこむ）
+  window.addEventListener("sk-shared", function () { fillAvatars(); if ($("home") && !$("home").hidden) renderStart(); });
   var asking = false;
   function askReconnect() {
     if (asking) return;
@@ -468,6 +560,12 @@
     ["BIZ UDPゴシック", '"BIZ UDPGothic", "Yu Gothic", sans-serif'], ["游明朝", '"Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif'], ["BIZ UD明朝", '"BIZ UDMincho", "Yu Mincho", serif'],
     ["Arial", "Arial, Helvetica, sans-serif"], ["Times New Roman", '"Times New Roman", Times, serif'], ["Georgia", "Georgia, serif"], ["Consolas", "Consolas, Menlo, monospace"]
   ];
+  // デスクトップ版は、PC に入っているフォントすべてを一覧の後ろに足す（Web 版は上の一覧だけ）
+  if (window.OfficePlatform && OfficePlatform.features.systemFonts) OfficePlatform.systemFonts().then(function (names) {
+    var have = {};
+    O.fonts.forEach(function (f) { have[f[0]] = 1; });
+    names.forEach(function (n) { if (!have[n]) O.fonts.push([n, '"' + String(n).replace(/["\\;{}<>]/g, "") + '", sans-serif']); });
+  }).catch(function () { /* 上の一覧だけで使える */ });
   O.fontCss = function (name) {
     for (var i = 0; i < O.fonts.length; i++) if (O.fonts[i][0] === name) return O.fonts[i][1];
     return '"' + String(name).replace(/["\\;{}<>]/g, "") + '", sans-serif';
@@ -535,13 +633,15 @@
     if (!current && (view === "info" || view === "export")) view = "home";
     var rail = '<nav class="rail" aria-label="' + esc(t("メニュー")) + '">' +
       (current ? railBtn("data-back-edit", "arrow_back", t("戻る")) : "") +
-      '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></a>" +
+      // デスクトップ版は、アプリごとに別々なので、Office の入り口（ほかのアプリの入り口）には戻らない
+      (DESKTOP ? '<span class="rail__brand" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></span>"
+        : '<a class="rail__brand" href="' + BASE + '" title="SK Hub Office"><span class="rail__logo">' + logo(a) + "</span><span>" + (a ? a.name : "Office") + "</span></a>") +
       railItem("home", "home", t("ホーム")) +
       (a ? railItem("new", "note_add", t("新規")) + railItem("open", "folder_open", t("開く")) : "") +
       (current ? railItem("info", "info", t("情報")) + railBtn("data-save-as", "save_as", t("コピーを保存")) + railItem("export", "ios_share", t("エクスポート")) +
         railBtn("data-print", "print", t("印刷")) + railBtn("data-close-file", "close", t("閉じる")) : "") +
       '<span class="rail__space"></span>' +
-      (a ? '<a class="rail__item rail__item--hub" href="' + BASE + '" title="' + esc(t("SK Hub Office のメインページ")) + '"><span class="rail__pill">' + appImg("office") + "</span><span>Office</span></a>"
+      (a ? (DESKTOP ? "" : '<a class="rail__item rail__item--hub" href="' + BASE + '" title="' + esc(t("SK Hub Office のメインページ")) + '"><span class="rail__pill">' + appImg("office") + "</span><span>Office</span></a>")
          : '<a class="rail__item" href="' + SITE + '/products/office/"><span class="rail__pill">' + icon("info") + "</span><span>" + esc(t("紹介")) + "</span></a>") +
       (installEvt && !standalone ? railBtn("data-install", "install_desktop", t("インストール")) : "") +
       railItem("account", "account_circle", t("アカウント")) +
@@ -675,7 +775,7 @@
   // エクスポート（ほかの形式で書き出す）
   function viewExport() {
     var list = [{ id: "sk", icon: "save_as", label: t("SK Hub Office のファイル"), desc: t("{ext} のファイルとして、好きな場所に保存します", { ext: Store.EXT[APP] }) },
-      { id: "pdf", icon: "picture_as_pdf", label: "PDF", desc: t("印刷の画面で「PDF に保存」を選びます") }].concat(App.exports || []);
+      { id: "pdf", icon: "picture_as_pdf", label: "PDF", desc: DESKTOP ? t("保存する場所を選ぶだけで、PDF にします") : t("印刷の画面で「PDF に保存」を選びます") }].concat(App.exports || []);
     return '<h1 class="start__h1">' + esc(t("エクスポート")) + "</h1>" +
       '<div class="export-grid">' + list.map(function (x) {
         return '<button type="button" class="export-card m3-state" data-export="' + esc(x.id) + '">' + icon(x.icon) + "<span><strong>" + esc(x.label) + "</strong><small>" + esc(x.desc || "") + "</small></span></button>";
@@ -686,7 +786,10 @@
     if (!current) return;
     flush();
     if (id === "sk") { Store.exportFile(current).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(failed); return; }
-    if (id === "pdf") { backToEditor(); setTimeout(doPrint, 300); return; }
+    if (id === "pdf") {
+      if (DESKTOP) { savePdf(); return; }
+      backToEditor(); setTimeout(doPrint, 300); return;
+    }
     Promise.resolve(App.exportAs(id)).then(function (ok) { if (ok) notify(t("書き出しました")); }).catch(function (e) {
       if (window.console) console.error(e);
       notify(t("書き出せませんでした"));
@@ -694,7 +797,7 @@
   }
   // アカウント（Microsoft Office の「アカウント」と同じ並び。左: ユーザー情報・プライバシー・テーマ・接続済みサービス、右: 製品情報と大きなボタン）
   function viewAccount() {
-    var hint = accountHint(), name = userName(), s = Store.state();
+    var hint = accountHint(), name = userName(), s = Store.state(), a2 = APPS[APP];
     // アプリとして入れたウィンドウからは、ブラウザでログインのページを開く（戻ってきたら、ログインの状態を読みなおす）
     var target = standalone ? ' target="_blank" rel="noopener"' : "";
     var blank = ' target="_blank" rel="noopener"';
@@ -721,8 +824,8 @@
               "<small>" + esc(hint && hint.email ? hint.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div></div>" +
             '<div class="acct-links">' + (hint
               // ログイン中に ?next= 付きで開くと、すぐ戻ってきてしまうので、管理のページはそのまま開く（戻ってきたら、ログインの状態を読みなおす）
-              ? '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("ログアウト")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントの管理")) + "</a>"
-              : '<a href="' + esc(loginUrl()) + '"' + target + ">" + esc(t("ログイン")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントを作る")) + "</a>") +
+              ? (DESKTOP ? '<button type="button" data-desktop-logout>' + esc(t("ログアウト")) + "</button>" : '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("ログアウト")) + "</a>") + '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントの管理")) + "</a>"
+              : (DESKTOP ? '<button type="button" data-desktop-login>' + esc(t("ログイン")) + "</button>" : '<a href="' + esc(loginUrl()) + '"' + target + ">" + esc(t("ログイン")) + "</a>") + '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントを作る")) + "</a>") +
               '<button type="button" data-view="options">' + esc(t("名前を変更")) + "</button></div></section>" +
           '<section class="acct__sec"><h2 class="acct__h">' + esc(t("アカウントのプライバシー")) + "</h2>" +
             '<a class="acct-btn m3-state" href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a></section>" +
@@ -743,7 +846,8 @@
         '<div class="acct__col">' +
           '<section class="acct__sec"><h2 class="acct__h">' + esc(t("製品情報")) + "</h2>" +
             '<p class="acct-brand">SK Hub Office</p>' +
-            '<p class="acct-product">' + esc(t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p>" +
+            '<p class="acct-product">' + esc(DESKTOP && desktopVersion ? t("SK Hub Office {app} バージョン {v}（開発中）", { app: a2 ? a2.name : "", v: desktopVersion }) : t("SK Hub Office バージョン {v}（開発中）", { v: VERSION })) + "</p>" +
+            (DESKTOP ? '<p class="acct-small"><button type="button" class="acct-btn m3-state" data-check-update>' + icon("system_update") + esc(t("更新を確認")) + "</button></p>" : "") +
             '<p class="acct-small">' + esc(t("この製品には以下が含まれます。")) + "</p>" +
             '<div class="acct-apps">' + ["doc", "sheet", "slide"].map(function (k) {
               return '<a class="acct-apps__ico" data-app="' + k + '" href="' + APPS[k].path + '" title="' + APPS[k].name + '" aria-label="' + APPS[k].name + '">' + appImg(k) + "</a>";
@@ -897,15 +1001,17 @@
   }
   function fileActions(id, name, at) {
     menu(at, [
-      { value: "open", label: t("開く"), icon: "open_in_new" },
+      { value: "open", label: t("開く"), icon: "open_in_new" }]
+      .concat(DESKTOP && !Store.isOutside(id) ? [{ value: "window", label: t("新しいウィンドウで開く"), icon: "open_in_browser" }] : []).concat([
       { value: "rename", label: t("名前を変更"), icon: "edit" },
       { value: "copy", label: t("コピーを作る"), icon: "content_copy" },
       { value: "export", label: t("ファイルとして書き出す"), icon: "download" },
       { sep: 1 },
       { value: "delete", label: t("削除"), icon: "delete" }
-    ]).then(function (v) {
+    ])).then(function (v) {
       if (!v) return;
       if (v === "open") return Store.get(id).then(function (f) { if (f) openFile(f.id, f.app); });
+      if (v === "window") return Store.get(id).then(function (f) { if (f) return OfficePlatform.openWindow(f.app, f.id); });
       if (v === "rename") return Store.get(id).then(function (f) { if (f) renameFile(f, renderFileTable); });
       if (v === "copy") return Store.get(id).then(function (f) {
         return f && Store.copy(f, t("{name} のコピー", { name: f.name })).then(function () { renderFileTable(); notify(t("コピーを作りました")); });
@@ -935,7 +1041,39 @@
     });
   }
   // ほかの場所のファイルを開く（SK Hub Office のファイル・アプリが読める Office のファイルなど）
+  // 読み込める形式（docx・html など。SK Hub Office のファイルではないもの）を、新しいファイルとして読み込む
+  function importForeign(file) {
+    notify(t("読み込んでいます…"));
+    return Promise.resolve(App.importFile(file)).then(function (data) {
+      var name = file.name.replace(/\.[^.]+$/, "") || APPS[APP].untitled;
+      return Store.create(APP, name, "import", data).then(function (f) { notify(t("「{name}」を読み込みました", { name: f.name })); openFile(f.id); });
+    }, function (e) {
+      if (window.console) console.error(e);
+      notify(e && e.message === "no-inflate" ? t("このブラウザでは、このファイルを読み込めません") : t("読み込めませんでした。ファイルがこわれているかもしれません"));
+    });
+  }
+  // デスクトップ版: Windows の「開く」のダイアログで選んで、そのファイルを、そのまま（コピーを作らずに）開く
+  //   同じアプリのファイルは、いまのウィンドウで 1 つ目を開く。ほかは、新しいウィンドウ（ほかのアプリのファイルは、そのアプリのページで）
+  function openWithDialog() {
+    var more = App && App.imports ? App.imports.accept : "";
+    var extra = more.split(",").map(function (s) { return s.trim().replace(/^\./, ""); }).filter(Boolean);
+    return OfficePlatform.pickOpenFiles(extra).then(function (paths) {
+      if (!paths.length) return;
+      var mine = [], rest = [], foreign = [];
+      paths.forEach(function (p) {
+        var a = Store.appOf(p);
+        if (a === APP && !mine.length) mine.push(p); else if (a) rest.push(p); else foreign.push(p);
+      });
+      var jobs = [];
+      if (rest.length) jobs.push(OfficePlatform.openPaths(rest));
+      if (foreign.length && App && App.importFile) jobs.push(OfficePlatform.readImportFile(foreign[0]).then(importForeign));
+      else if (foreign.length) notify(t("このアプリでは開けないファイルです"));
+      if (mine.length) jobs.push(Store.openPath(mine[0]).then(function (id) { openFile(id); }));
+      return Promise.all(jobs);
+    }).catch(failed);
+  }
   function importFile() {
+    if (DESKTOP) { openWithDialog(); return; }
     ensureFolder().then(function (ok) {
       if (!ok) return;
       var more = App && App.imports ? App.imports.accept : "";
@@ -946,14 +1084,7 @@
             function () { notify(t("SK Hub Office のファイルではないので、開けませんでした")); });
         }
         if (!more) { notify(t("このアプリでは開けないファイルです")); return; }
-        notify(t("読み込んでいます…"));
-        return Promise.resolve(App.importFile(file)).then(function (data) {
-          var name = file.name.replace(/\.[^.]+$/, "") || APPS[APP].untitled;
-          return Store.create(APP, name, "import", data).then(function (f) { notify(t("「{name}」を読み込みました", { name: f.name })); openFile(f.id); });
-        }, function (e) {
-          if (window.console) console.error(e);
-          notify(e && e.message === "no-inflate" ? t("このブラウザでは、このファイルを読み込めません") : t("読み込めませんでした。ファイルがこわれているかもしれません"));
-        });
+        return importForeign(file);
       });
     }).catch(failed);
   }
@@ -1135,7 +1266,7 @@
     dirty = false;
     setStatus(t("保存しています…"));
     return Store.save(f).then(function () {
-      if (current === f && !dirty) setStatus(t("保存済み"));
+      if (current === f && !dirty) setStatus(f.queued ? t("オフライン・つながったら Google ドライブに送ります") : t("保存済み"));
       // 10 分ごとに、版の履歴に残す
       if (Date.now() - lastVersion > 600000) { lastVersion = Date.now(); Store.addVersion(f.id, f.data); }
       return true;
@@ -1196,14 +1327,17 @@
           "<small>" + esc(h && h.email ? h.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div></div>" +
         '<div class="menu__sep" role="separator"></div>' +
         (h ? '<a class="menu__item m3-state" data-v="manage" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("manage_accounts") + '<span class="menu__label">' + esc(t("アカウントの管理")) + "</span></a>" +
-             '<a class="menu__item m3-state" data-v="logout" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></a>"
-           : '<a class="menu__item m3-state" data-v="login" href="' + esc(loginUrl()) + '">' + icon("login") + '<span class="menu__label">' + esc(t("ログイン")) + "</span></a>" +
+             (DESKTOP ? '<button type="button" class="menu__item m3-state" data-v="logout">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></button>"
+               : '<a class="menu__item m3-state" data-v="logout" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></a>")
+           : (DESKTOP ? '<button type="button" class="menu__item m3-state" data-v="login">' : '<a class="menu__item m3-state" data-v="login" href="' + esc(loginUrl()) + '">') + icon("login") + '<span class="menu__label">' + esc(t("ログイン")) + (DESKTOP ? "</span></button>" : "</span></a>") +
              '<a class="menu__item m3-state" data-v="create" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("person_add") + '<span class="menu__label">' + esc(t("アカウントを作る")) + "</span></a>") +
         '<button type="button" class="menu__item m3-state" data-v="name">' + icon("edit") + '<span class="menu__label">' + esc(t("名前を変更")) + "</span></button>" +
         '<button type="button" class="menu__item m3-state" data-v="account">' + icon("account_circle") + '<span class="menu__label">' + esc(t("アカウントの設定")) + "</span></button>";
       fillAvatars();
       box.addEventListener("click", function (e) { var b = e.target.closest("[data-v]"); if (b) done(b.getAttribute("data-v")); });
     }).then(function (v) {
+      if (DESKTOP && v === "login") return desktopLogin();
+      if (DESKTOP && v === "logout") return desktopLogout();
       if (v === "name" || v === "account") { flush(); view = v === "name" ? "options" : "account"; renderStart(); show("home"); }
     });
   }
@@ -1274,6 +1408,26 @@
   window.addEventListener("beforeprint", beforePrint);
   window.addEventListener("afterprint", afterPrint);
   function doPrint() { if ($("editor").hidden) backToEditor(); window.print(); }
+  // デスクトップ版: 印刷のダイアログなしで、PDF に書き出す（保存する場所を選ぶだけ）。印刷と同じ見た目（beforePrint で切りかえたもの）を使う
+  function savePdf() {
+    var P = window.OfficePlatform;
+    if (!current || !P) return;
+    if ($("editor").hidden) backToEditor();
+    return P.pickPdfPath(current.name).then(function (path) {
+      if (!path) return;
+      notify(t("PDF を書き出しています…"));
+      beforePrint();
+      var css = printStyle ? printStyle.textContent : "";
+      // 印刷用の見た目に変わるのを待ってから書き出す
+      return new Promise(function (r) { setTimeout(r, 300); }).then(function () { return P.printPdf(path, css); }).then(function () {
+        afterPrint();
+        notify(t("PDF に書き出しました"));
+      }, function (e) { afterPrint(); throw e; });
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      notify(t("PDF に書き出せませんでした"));
+    });
+  }
 
   function showKeys() {
     var list = [["Ctrl+S", t("保存")], ["Ctrl+Z", t("元に戻す")], ["Ctrl+Y", t("やり直し")], ["Ctrl+C / X / V", t("コピー・切り取り・貼り付け")],
@@ -1362,7 +1516,7 @@
         if (!ok) return;
         lastVersion = Date.now();
         Store.addVersion(current.id, current.data);
-        notify(current.place === "drive" ? t("Google ドライブに保存しました") : current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
+        notify(current.queued ? t("オフラインです。つながったら Google ドライブに送ります") : current.place === "drive" ? t("Google ドライブに保存しました") : current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
       });
       return;
     }
@@ -1450,6 +1604,9 @@
       return;
     }
     if ((el = e.target.closest("[data-place]"))) { setPlace(el.getAttribute("data-place")); return; }
+    if (e.target.closest("[data-check-update]")) { checkUpdate(true); return; }
+    if (e.target.closest("[data-desktop-login]")) { desktopLogin(); return; }
+    if (e.target.closest("[data-desktop-logout]")) { desktopLogout(); return; }
     if (e.target.closest("[data-drive-connect]")) { connectDrive().then(function (ok) { if (ok) afterFolder(); }); return; }
     if (e.target.closest("[data-drive-disconnect]")) {
       M3.confirm({ title: t("Google ドライブを外しますか？"), text: t("Google ドライブのファイルは消えません。つなぎなおすと、また開けます。"), ok: t("外す"), icon: "link_off" }).then(function (ok) {
@@ -1524,6 +1681,81 @@
     if (id === "opt-motion") { settings.motion = e.target.checked ? "reduce" : "auto"; saveSettings(); applySettings(); }
     if (id === "opt-autosave") { settings.autosave = e.target.checked; saveSettings(); if (settings.autosave && dirty) saveNow(); notify(settings.autosave ? t("自動保存をオンにしました") : t("自動保存をオフにしました")); }
   });
+  // デスクトップ版: Ctrl+Shift+N で、新しいウィンドウ（いまと同じアプリ）。Ctrl+O で、「開く」のダイアログ
+  if (DESKTOP) document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    var k = e.key.toLowerCase();
+    if (e.shiftKey && k === "n") { e.preventDefault(); OfficePlatform.openWindow(APPS[APP] ? APP : "hub"); }
+    else if (!e.shiftKey && k === "o" && APPS[APP] && !document.querySelector(".tbs-dialog-scrim, .present")) { e.preventDefault(); openWithDialog(); }
+  });
+
+  // デスクトップ版: Explorer からウィンドウにファイル（.skdoc など）をドロップして開く（コピーを作らず、そのファイルを直接開く）
+  //   ドロップの中身が SK Hub Office のファイルでないときは、何もしない（エディタへの画像のドロップなどは、そのまま）
+  if (DESKTOP && APPS[APP]) {
+    var dropFiles = function (e) { return e.dataTransfer && Array.prototype.some.call(e.dataTransfer.items || [], function (it) { return it.kind === "file"; }); };
+    document.addEventListener("dragover", function (e) { if (dropFiles(e) && !current) e.preventDefault(); });
+    document.addEventListener("drop", function (e) {
+      if (!dropFiles(e)) return;
+      var items = Array.prototype.filter.call(e.dataTransfer.items, function (it) { return it.kind === "file"; });
+      var files = Array.prototype.slice.call(e.dataTransfer.files);
+      if (!files.some(function (f) { return Store.appOf(f.name); })) return; // SK Hub Office のファイルでなければ、ふつうのドロップ
+      e.preventDefault();
+      // ハンドルは、ドロップのイベントの中でしか取れない
+      var handles = items.map(function (it, i) { return typeof it.getAsFileSystemHandle === "function" ? it.getAsFileSystemHandle().catch(function () { return null; }) : Promise.resolve(null); });
+      Promise.all(handles).then(function (hs) {
+        var first = true;
+        return hs.reduce(function (p, h, i) {
+          var f = files[i];
+          if (!f || !Store.appOf(f.name)) return p;
+          return p.then(function () {
+            if (Store.appOf(f.name) !== APP) { notify(t("ほかのアプリのファイルです。そのアプリで開いてください")); return; }
+            var open = h && h.kind === "file" ? Store.openHandle(h).then(function (id) { return id; }) : Store.importFile(f).then(function (x) { return x.id; });
+            return open.then(function (id) { if (first) { first = false; openFile(id); } else OfficePlatform.openWindow(APP, id).catch(function () {}); });
+          });
+        }, Promise.resolve());
+      }).catch(failed);
+    });
+  }
+
+  // デスクトップ版: 右クリックのメニュー。ブラウザの標準のメニュー（戻る・再読み込み・検証…）は出さない
+  //   ・ファイルの一覧の上: ファイルのメニュー（⋮ と同じ）  ・文字を入力・編集できるところ・文字を選んでいるところ: 切り取り・コピー・貼り付け・すべて選択
+  //   Sheet・Slide など、アプリが自分で右クリックのメニューを出すところ（preventDefault 済み）は、そちらにまかせる
+  if (DESKTOP) document.addEventListener("contextmenu", function (e) {
+    if (e.defaultPrevented) return;
+    e.preventDefault();
+    var el = e.target, at = { x: e.clientX, y: e.clientY };
+    var open = el.closest && el.closest("[data-open]");
+    if (open) {
+      var row = open.closest(".frow") || open.parentElement, more = row && row.querySelector("[data-more]");
+      if (more) fileActions(more.getAttribute("data-more"), more.getAttribute("data-name"), at);
+      return;
+    }
+    var field = el.closest && el.closest("input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]), textarea");
+    var editable = field || (el.closest && el.closest("[contenteditable]:not([contenteditable=false])"));
+    var sel = String(window.getSelection ? window.getSelection() : ""), hasSel = field ? field.selectionStart !== field.selectionEnd : !!sel;
+    if (!editable && !hasSel) return;
+    var ro = !!(field && (field.readOnly || field.disabled));
+    var inEditor = !field && App && App.clip && el.closest("#editor");
+    menu(at, [
+      { value: "cut", label: t("切り取り"), icon: "content_cut", sub: "Ctrl+X", disabled: !editable || ro || !hasSel },
+      { value: "copy", label: t("コピー"), icon: "content_copy", sub: "Ctrl+C", disabled: !hasSel },
+      { value: "paste", label: t("貼り付け"), icon: "content_paste", sub: "Ctrl+V", disabled: !editable || ro },
+      { sep: 1 },
+      { value: "all", label: t("すべて選択"), icon: "select_all", sub: "Ctrl+A" }
+    ]).then(function (v) {
+      if (!v) return;
+      if (field) field.focus();
+      if (v === "all") { if (field) field.select(); else document.execCommand("selectAll"); return; }
+      if (inEditor) { runCmd(v); return; }
+      if (v === "paste") {
+        return navigator.clipboard.readText().then(function (text) {
+          if (field) { field.setRangeText(text, field.selectionStart, field.selectionEnd, "end"); field.dispatchEvent(new Event("input", { bubbles: true })); }
+          else document.execCommand("insertText", false, text);
+        }).catch(function () { notify(t("貼り付けられませんでした。Ctrl+V をお試しください")); });
+      }
+      document.execCommand(v);
+    });
+  });
   document.addEventListener("keydown", function (e) {
     if (!current || !$("editor") || $("editor").hidden || document.querySelector(".tbs-dialog-scrim, .present")) return;
     var k = e.key.toLowerCase(), mod = e.ctrlKey || e.metaKey;
@@ -1587,10 +1819,14 @@
   fillAvatars();
   // office.sk-hub.jp: 開いたときに、sk-hub.jp のログインの状態を受け取る
   if (bridge) setTimeout(function () { syncAccount(); }, 600);
-  Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); });
+  Store.init().then(route, route).then(function () { if (window.SKI18N) SKI18N.translatePage(); }).then(function () {
+    // デスクトップ版: 最初の表示ができたので、起動画面を閉じて、このウィンドウを出してもらう（OS の起動画面は desktop/splash/splash.html）
+    if (DESKTOP) OfficePlatform.invoke("app_ready").catch(function () {});
+  });
   // オフラインでも開けるように（/office/sw.js）
   // 手元（localhost）では登録しない（直したところがキャッシュで見えなくなるため。前に入ったものは外す）
-  var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  // デスクトップ版は画面を同梱しているので、サービスワーカーは使わない（前に入ったものは外す）
+  var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) || (window.OfficePlatform && OfficePlatform.isDesktop);
   if ("serviceWorker" in navigator && /^https?:$/.test(location.protocol)) {
     if (LOCAL) navigator.serviceWorker.getRegistrations().then(function (rs) { rs.forEach(function (r) { r.unregister(); }); }).catch(function () {});
     else navigator.serviceWorker.register(BASE + "sw.js", { scope: BASE }).catch(function () { /* なくても使える */ });
@@ -1602,9 +1838,15 @@
       Store.init().then(function () { return Store.openHandle(params.files[0]); }).then(function (id) { openFile(id); }).catch(failed);
     });
   }
+  // デスクトップ版: 起動の引数のファイル（.skdoc などをダブルクリックして起動したとき）
+  if (APPS[APP]) Store.launchFiles().then(function (paths) {
+    if (!paths.length) return;
+    return Store.init().then(function () { return Store.openPath(paths[0]); }).then(function (id) { openFile(id); });
+  }).catch(failed);
   // 起動画面は、少し見せてから消す
   var splash = $("splash");
-  if (splash) setTimeout(function () {
+  if (splash && DESKTOP) splash.hidden = true; // デスクトップ版は、ウィンドウの外の起動画面があるので、ページの中のものは出さない
+  else if (splash) setTimeout(function () {
     splash.classList.add("is-done");
     setTimeout(function () { splash.hidden = true; }, reduced ? 0 : 420);
   }, reduced ? 0 : 1000);

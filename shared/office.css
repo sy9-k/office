@@ -951,6 +951,17 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
   background: var(--md-primary-container); color: var(--md-on-primary-container); font-size: 13px; line-height: 1;
   app-region: drag; -webkit-app-region: drag; user-select: none; -webkit-user-select: none;
 }
+/* デスクトップ版（Tauri。標準のタイトルバーなし）: 帯の高さと、右の「－ □ ×」のぶんのあき（3 つ × 46px）を自分で決める */
+:root.is-wco.is-native-bar { --wco-h: 36px; --wco-l: 0px; --wco-r: 138px; }
+.win-ctrl { position: fixed; top: 0; right: 0; z-index: 10000; display: flex; height: 36px; user-select: none; -webkit-user-select: none; }
+.win-ctrl__b { width: 46px; height: 36px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--md-on-primary-container, currentColor); cursor: default; }
+.win-ctrl__b svg { width: 10px; height: 10px; }
+.win-ctrl__b:hover { background: color-mix(in srgb, var(--md-on-primary-container, #000) 14%, transparent); }
+.win-ctrl__b:active { background: color-mix(in srgb, var(--md-on-primary-container, #000) 22%, transparent); }
+.win-ctrl__b--close:hover, .win-ctrl__b--close:active { background: #c42b1c; color: #fff; }
+.win-ctrl__b:focus-visible { outline: 2px solid var(--md-primary, currentColor); outline-offset: -2px; }
+html:not(.is-native-bar) .win-ctrl { display: none; }
+body:has(.present) .win-ctrl { display: none; }
 :root.is-wco .rail { padding-top: 8px; }
 .wco-bar__logo { display: grid; place-items: center; }
 .wco-bar__logo .msr { font-size: 18px; }
@@ -1162,7 +1173,7 @@ button.fx-ico { height: 28px; padding: 0 8px; border: 0; border-radius: 8px; bac
 .keys__in dd { margin: 0; color: var(--md-on-surface-variant); }
 
 @media print {
-  .splash, .start, .titlebar, .ribbon, .findbar, .statusbar, .snackbar, .wco-bar, .deck-thumbs, .deck-notes, .sheet-tabs, .fx-bar, .keys { display: none !important; }
+  .splash, .start, .titlebar, .ribbon, .findbar, .statusbar, .snackbar, .wco-bar, .win-ctrl, .deck-thumbs, .deck-notes, .sheet-tabs, .fx-bar, .keys { display: none !important; }
   .editor { display: block !important; background: #fff; }
   .canvas { overflow: visible; background: #fff; }
   .doc-scroll, .sheet, .grid-scroll, .deck, .deck-stage { height: auto; overflow: visible; display: block; }

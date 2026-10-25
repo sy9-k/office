@@ -1,0 +1,11 @@
+{
+  "productName": "SK Hub Office Slide",
+  "identifier": "jp.sk-hub.office.slide",
+  "bundle": {
+    "shortDescription": "SK Hub Office Slide（スライド）",
+    "icon": ["icons/slide/32x32.png", "icons/slide/128x128.png", "icons/slide/128x128@2x.png", "icons/slide/icon.ico"],
+    "fileAssociations": [
+      { "ext": ["skslide"], "name": "SK Hub Office Slide", "description": "SK Hub Office スライド", "mimeType": "application/x-sk-hub-office-slide", "role": "Editor" }
+    ]
+  }
+}

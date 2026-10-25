@@ -13,6 +13,15 @@
   var GOOGLE_CLIENT_ID = "";
   // ここに書く前に試すときは、ブラウザの localStorage の sk_office_google_client に入れてもよい
   var CLIENT_ID = window.OFFICE_GOOGLE_CLIENT_ID || (function () { try { return localStorage.getItem("sk_office_google_client") || ""; } catch (e) { return ""; } })() || GOOGLE_CLIENT_ID;
+  // デスクトップ版（shared/platform.js）は、いつものブラウザでログインする（OAuth の認可コード + PKCE。127.0.0.1 に戻ってくる）
+  //   必要なのは「OAuth クライアント ID（デスクトップ アプリ）」。デスクトップ アプリの種類では client_secret も発行されるが、秘密にはならない前提のもの
+  //   リフレッシュトークンを Rust が OS の保管庫に入れるので、1 時間ごとのつなぎなおしは要らない
+  var Platform = window.OfficePlatform || null;
+  var desk = !!(Platform && Platform.features.externalLogin);
+  var GOOGLE_DESKTOP_CLIENT_ID = "", GOOGLE_DESKTOP_CLIENT_SECRET = "";
+  function lsGet(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
+  if (desk) CLIENT_ID = window.OFFICE_GOOGLE_DESKTOP_CLIENT_ID || lsGet("sk_office_google_desktop_client") || GOOGLE_DESKTOP_CLIENT_ID;
+  var CLIENT_SECRET = window.OFFICE_GOOGLE_DESKTOP_CLIENT_SECRET || lsGet("sk_office_google_desktop_secret") || GOOGLE_DESKTOP_CLIENT_SECRET;
   var SCOPE = "https://www.googleapis.com/auth/drive.file";
   var API = "https://www.googleapis.com/drive/v3", UPLOAD = "https://www.googleapis.com/upload/drive/v3";
   var FOLDER_NAME = "SK Hub Office", FOLDER_MIME = "application/vnd.google-apps.folder", FILE_MIME = "application/json";
@@ -21,10 +30,14 @@
   function load() { try { return JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { return {}; } }
   function store(o) { try { localStorage.setItem(KEY, JSON.stringify(o)); } catch (e) { /* 覚えられなくても、このページでは使える */ } }
   var saved = load();
+  // デスクトップ版でほかのアプリがつなぎなおしたとき（platform.js の共有）に、読みなおす
+  window.addEventListener("sk-shared", function () { saved = load(); });
   function tokenOk() { return saved.token && saved.exp > Date.now() + 60000; }
+  // デスクトップ版は、保管したリフレッシュトークンで、切れたトークンを自動で取りなおせる（saved.rt: つないだときに保管できたか）
+  function canRefresh() { return desk && !!saved.rt; }
 
   // "unconfigured"（CLIENT_ID がない）・"off"（つないでいない）・"needs-auth"（つないだことはあるが、トークンが切れた）・"ready"
-  function state() { return !CLIENT_ID ? "unconfigured" : !saved.on ? "off" : tokenOk() ? "ready" : "needs-auth"; }
+  function state() { return !CLIENT_ID ? "unconfigured" : !saved.on ? "off" : tokenOk() || canRefresh() ? "ready" : "needs-auth"; }
 
   // ---------- ログイン（Google Identity Services） ----------
   var gis = null;
@@ -42,8 +55,54 @@
     return gis;
   }
   // つなぐ（ボタンを押したときに呼ぶ）。hint: ログインの画面で先に選んでおくメールアドレス。やめたら false
+  function b64url(bytes) { var s = ""; bytes.forEach(function (b) { s += String.fromCharCode(b); }); return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+  function randomText(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return b64url(a); }
+  // デスクトップ版のログイン: ブラウザで Google のログイン → 127.0.0.1 に戻る → code をトークンに替える（Rust）
+  function connectDesktop(hint) {
+    var verifier = randomText(48), state = randomText(18);
+    var challenge = window.crypto && crypto.subtle ? crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(function (h) { return { c: b64url(new Uint8Array(h)), m: "S256" }; })
+      : Promise.resolve({ c: verifier, m: "plain" });
+    return challenge.then(function (ch) {
+      var url = "https://accounts.google.com/o/oauth2/v2/auth?client_id=" + encodeURIComponent(CLIENT_ID) + "&redirect_uri={redirect}&response_type=code&scope=" + encodeURIComponent(SCOPE) +
+        "&code_challenge=" + ch.c + "&code_challenge_method=" + ch.m + "&state=" + state + "&access_type=offline&prompt=consent" + (hint || saved.email ? "&login_hint=" + encodeURIComponent(hint || saved.email) : "");
+      return Platform.externalLogin(url, 600);
+    }).then(function (r) {
+      if (!r || r.error || !r.code || r.state !== state) return false;
+      var form = { grant_type: "authorization_code", code: r.code, code_verifier: verifier, redirect_uri: r._redirect, client_id: CLIENT_ID };
+      if (CLIENT_SECRET) form.client_secret = CLIENT_SECRET;
+      return Platform.googleToken(form, false).then(function (tk) {
+        if (!tk || tk.error || !tk.access_token) return false;
+        saved.token = tk.access_token; saved.exp = Date.now() + (+tk.expires_in || 3600) * 1000; saved.on = true;
+        return Platform.googleHasRefresh().then(function (has) { saved.rt = !!has; store(saved); return true; });
+      });
+    }, function () { return false; });
+  }
+  // 切れたトークンを、保管したリフレッシュトークンで取りなおす（同時に何度も呼ばれても 1 回だけ）
+  var refreshing = null;
+  function refreshToken() {
+    if (refreshing) return refreshing;
+    var form = { grant_type: "refresh_token", client_id: CLIENT_ID };
+    if (CLIENT_SECRET) form.client_secret = CLIENT_SECRET;
+    refreshing = Platform.googleToken(form, true).then(function (tk) {
+      refreshing = null;
+      if (!tk || tk.error || !tk.access_token) {
+        if (tk && tk.error === "invalid_grant") { saved.rt = false; store(saved); } // 取り消された。つなぎなおしてもらう
+        throw fail(401, "refresh");
+      }
+      saved.token = tk.access_token; saved.exp = Date.now() + (+tk.expires_in || 3600) * 1000; store(saved);
+    }, function (e) { refreshing = null; throw e && e.status ? e : fail(0, String(e)); });
+    return refreshing;
+  }
   function connect(hint) {
     if (!CLIENT_ID) return Promise.reject(new Error("unconfigured"));
+    if (desk) return connectDesktop(hint).then(function (ok) {
+      if (!ok) return false;
+      return api("GET", "/about?fields=user(emailAddress,displayName)").then(function (a) {
+        saved.email = a.user && a.user.emailAddress || ""; saved.name = a.user && a.user.displayName || "";
+        store(saved);
+        return true;
+      }, function () { return true; });
+    });
     return loadGis().then(function () {
       return new Promise(function (resolve) {
         var client = google.accounts.oauth2.initTokenClient({
@@ -72,6 +131,7 @@
     var tk = saved.token;
     saved = {};
     store(saved);
+    if (desk) return Platform.googleSignout().catch(function () {});
     if (tk && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(tk, function () {});
     return Promise.resolve();
   }
@@ -80,13 +140,20 @@
   function fail(status, text) { var e = new Error(status === 401 ? "auth" : status === 404 ? "not-found" : "drive-" + status); e.status = status; e.detail = text; return e; }
   function api(method, path, body, opts) {
     opts = opts || {};
-    if (!tokenOk()) return Promise.reject(fail(401, "expired"));
+    if (!tokenOk()) {
+      // デスクトップ版は、取りなおしてからもう一度（取りなおせないときだけ、つなぎなおしてもらう）
+      if (canRefresh() && !opts.refreshed) return refreshToken().then(function () { return api(method, path, body, Object.assign({}, opts, { refreshed: true })); });
+      return Promise.reject(fail(401, "expired"));
+    }
     var headers = { Authorization: "Bearer " + saved.token };
     if (opts.type) headers["Content-Type"] = opts.type;
     else if (body !== undefined && typeof body !== "string") { headers["Content-Type"] = "application/json; charset=UTF-8"; body = JSON.stringify(body); }
     return fetch((opts.upload ? UPLOAD : API) + path, { method: method, headers: headers, body: body }).then(function (res) {
       // 401: トークンが切れた・取り消された。つなぎなおしてもらう
-      if (res.status === 401) { saved.exp = 0; store(saved); }
+      if (res.status === 401) {
+        saved.exp = 0; store(saved);
+        if (canRefresh() && !opts.refreshed) return refreshToken().then(function () { return api(method, path, body, Object.assign({}, opts, { refreshed: true })); });
+      }
       if (!res.ok) return res.text().then(function (x) { throw fail(res.status, x); });
       if (opts.raw) return res.text();
       return res.status === 204 ? null : res.json();
