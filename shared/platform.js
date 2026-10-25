@@ -34,7 +34,8 @@
     },
     // いつものブラウザでログインする。urlTemplate の {port}・{redirect} は、このアプリが待っているアドレスに置きかわる
     //   ログインが終わってブラウザが戻ってきたときの検索文字列（code・state・hint…と、_redirect）を返す。やめた・時間切れは reject
-    externalLogin: function (urlTemplate, timeoutSecs) { return Platform.invoke("external_login", { urlTemplate: urlTemplate, timeoutSecs: timeoutSecs || 600 }); },
+    //   inApp: true なら、いつものブラウザではなく、アプリの中の小さなログイン用のウィンドウで開く（SK Hub Systems のページ用。Google のログインは組み込みの画面を断るので、drive.js は使わない）
+    externalLogin: function (urlTemplate, timeoutSecs, inApp) { return Platform.invoke("external_login", { urlTemplate: urlTemplate, timeoutSecs: timeoutSecs || 600, inApp: !!inApp }); },
     cancelLogin: function () { return Platform.invoke("external_login_cancel"); },
     openExternal: function (url) { return Platform.invoke("open_external", { url: url }); },
     // Google のトークン（リフレッシュトークンは Rust が OS の保管庫に入れ、ここには来ない）

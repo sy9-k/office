@@ -330,13 +330,17 @@ fn login_host_ok(url: &url::Url) -> bool {
 
 const DONE_PAGE: &str = "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SK Hub Office</title><body style=\"font-family:system-ui,'Yu Gothic',sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#faf8ff;color:#1a1c20\"><div style=\"text-align:center;padding:24px\"><h1 style=\"font-size:20px\">ログインしました</h1><p>このタブを閉じて、SK Hub Office に戻ってください。</p></div></body></html>";
 
+const SWITCH_PAGE: &str = "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><title>SK Hub Office</title><body style=\"font-family:system-ui,'Yu Gothic',sans-serif;display:grid;place-items:center;min-height:100vh;margin:0\"><p>ブラウザでログインします…</p></body></html>";
+
 #[tauri::command]
 async fn external_login(
     app: tauri::AppHandle,
     url_template: String,
     timeout_secs: u64,
+    in_app: Option<bool>,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     use std::io::{Read, Write};
+    use std::sync::atomic::AtomicBool;
     let mine = LOGIN_GEN.fetch_add(1, Ordering::SeqCst) + 1; // 前の待ちうけは、ここで終わる
     tauri::async_runtime::spawn_blocking(move || {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
@@ -349,16 +353,51 @@ async fn external_login(
         if !login_host_ok(&target) {
             return Err("bad-login-url".into());
         }
-        tauri_plugin_opener::OpenerExt::opener(&app)
-            .open_url(target.as_str(), None::<&str>)
-            .map_err(|e| e.to_string())?;
+        let open_browser = |u: &url::Url| -> Result<(), String> {
+            tauri_plugin_opener::OpenerExt::opener(&app).open_url(u.as_str(), None::<&str>).map_err(|e| e.to_string())
+        };
+        // アプリの中の小さなログイン用のウィンドウ（画面の本体とは別。IPC は使えない）。閉じられたら、ログインをやめたことにする
+        //   Google・GitHub・Microsoft はポップアップでログインするページで、Google は組み込みの画面でのログインを断る。
+        //   そのボタンをページが押されたら、http://127.0.0.1:ポート/switch に移動するので、ここで、いつものブラウザに切りかえる
+        let done = std::sync::Arc::new(AtomicBool::new(false));
+        let close_login = || {
+            done.store(true, Ordering::SeqCst);
+            if let Some(w) = app.get_webview_window("login") {
+                let _ = w.close();
+            }
+        };
+        if in_app.unwrap_or(false) {
+            if let Some(old) = app.get_webview_window("login") {
+                let _ = old.close();
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            let mut shown = target.clone();
+            shown.query_pairs_mut().append_pair("inapp", "1");
+            let win = tauri::WebviewWindowBuilder::new(&app, "login", tauri::WebviewUrl::External(shown))
+                .title("SK Hub Systems アカウントにログイン")
+                .inner_size(460.0, 720.0)
+                .min_inner_size(380.0, 520.0)
+                .center()
+                .build()
+                .map_err(|e| e.to_string())?;
+            let d = done.clone();
+            win.on_window_event(move |ev| {
+                if let tauri::WindowEvent::Destroyed = ev {
+                    if !d.load(Ordering::SeqCst) {
+                        let _ = LOGIN_GEN.compare_exchange(mine, mine + 1, Ordering::SeqCst, Ordering::SeqCst);
+                    }
+                }
+            });
+        } else {
+            open_browser(&target)?;
+        }
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs.clamp(10, 900));
-        loop {
+        let result: Result<std::collections::HashMap<String, String>, String> = loop {
             if LOGIN_GEN.load(Ordering::SeqCst) != mine {
-                return Err("cancelled".into());
+                break Err("cancelled".into());
             }
             if std::time::Instant::now() > deadline {
-                return Err("timeout".into());
+                break Err("timeout".into());
             }
             let (mut stream, _) = match listener.accept() {
                 Ok(s) => s,
@@ -366,7 +405,7 @@ async fn external_login(
                     std::thread::sleep(std::time::Duration::from_millis(120));
                     continue;
                 }
-                Err(e) => return Err(e.to_string()),
+                Err(e) => break Err(e.to_string()),
             };
             let _ = stream.set_nonblocking(false);
             let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
@@ -375,23 +414,41 @@ async fn external_login(
             let head = String::from_utf8_lossy(&buf[..n]);
             let path = head.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/");
             let parsed = url::Url::parse(&format!("http://127.0.0.1{path}")).ok();
+            let switching = parsed.as_ref().map(|u| u.path() == "/switch").unwrap_or(false);
             let params: std::collections::HashMap<String, String> = parsed
                 .as_ref()
                 .filter(|u| u.path() == "/callback")
                 .map(|u| u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect())
                 .unwrap_or_default();
-            let (status, body) = if params.is_empty() { ("404 Not Found", "") } else { ("200 OK", DONE_PAGE) };
+            let (status, body) = if switching {
+                ("200 OK", SWITCH_PAGE)
+            } else if params.is_empty() {
+                ("404 Not Found", "")
+            } else {
+                ("200 OK", DONE_PAGE)
+            };
             let _ = write!(
                 stream,
                 "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
                 body.len()
             );
+            drop(stream);
+            if switching {
+                // 小さなウィンドウを閉じて、同じログインのページを、いつものブラウザで開く
+                close_login();
+                if let Err(e) = open_browser(&target) {
+                    break Err(e);
+                }
+                continue;
+            }
             if !params.is_empty() {
                 let mut params = params;
                 params.insert("_redirect".into(), redirect.clone()); // トークンを取るときに、同じ redirect_uri を送る
-                return Ok(params);
+                break Ok(params);
             }
-        }
+        };
+        close_login();
+        result
     })
     .await
     .map_err(|e| e.to_string())?

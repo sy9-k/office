@@ -237,8 +237,8 @@
     crypto.getRandomValues(a);
     a.forEach(function (b) { st += String.fromCharCode(b); });
     st = btoa(st).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    notify(t("ブラウザでログインしてください"));
-    return P.externalLogin(SITE + "/account/?desktop={port}&state=" + st, 600).then(function (r) {
+    // アプリの中の小さなウィンドウでログインする（Google・GitHub・Microsoft のボタンだけは、ページが、いつものブラウザに切りかえる）
+    return P.externalLogin(SITE + "/account/?desktop={port}&state=" + st, 600, true).then(function (r) {
       if (!r || r.state !== st || !r.hint) throw new Error("login");
       var b64 = r.hint.replace(/-/g, "+").replace(/_/g, "/"), bin = atob(b64 + "===".slice((b64.length + 3) % 4)), bytes = new Uint8Array(bin.length);
       for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
