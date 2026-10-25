@@ -1,0 +1,15 @@
+{
+  "name": "sk-hub-office-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SK Hub Office のデスクトップ版（Tauri 2）。画面は ../ の Web 版をそのまま同梱する",
+  "scripts": {
+    "prepare-web": "node scripts/prepare-web.mjs",
+    "dev": "npm run prepare-web && tauri dev",
+    "build": "npm run prepare-web && tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
