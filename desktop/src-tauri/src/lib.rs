@@ -283,6 +283,8 @@ fn open_window(app: &tauri::AppHandle, page: &str, hash: Option<&str>, open: Opt
         .title(app_title(kind))
         .inner_size(1280.0, 800.0)
         .min_inner_size(800.0, 560.0)
+        // Windows の標準の枠・タイトルバーは使わず、Office のタイトルバーに「－ □ ×」を入れる（shared/platform.js・office.css の .win-ctrl）
+        .decorations(false)
         .initialization_script(script)
         .build()
         .map_err(|e| e.to_string())?;

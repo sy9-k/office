@@ -47,11 +47,15 @@ VIAddVersionKey /LANG=1041 "LegalCopyright" "SK Hub"
 !macro InstallApp APP EXT PROGID TITLE DESC
   SetOutPath "$INSTDIR"
   File "/oname=SK Hub Office ${APP}.exe" "${STAGE}\${APP}.exe"
+  ; ファイル（.skdoc など）のアイコンは、アプリのアイコンではなく、紙に六角形のバッジの専用の絵（icons/src/sk-*-file.png から作った .ico）
+  SetOutPath "$INSTDIR\icons"
+  File "/oname=${EXT}.ico" "${STAGE}\icons\${APP}-file.ico"
+  SetOutPath "$INSTDIR"
   CreateShortCut "$SMPROGRAMS\SK Hub Office ${APP}.lnk" "$INSTDIR\SK Hub Office ${APP}.exe" "" "$INSTDIR\SK Hub Office ${APP}.exe" 0
   WriteRegStr HKCU "Software\Classes\.${EXT}" "" "${PROGID}"
   WriteRegStr HKCU "Software\Classes\.${EXT}" "Content Type" "application/x-sk-hub-office-${EXT}"
   WriteRegStr HKCU "Software\Classes\${PROGID}" "" "${DESC}"
-  WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" '"$INSTDIR\SK Hub Office ${APP}.exe",0'
+  WriteRegStr HKCU "Software\Classes\${PROGID}\DefaultIcon" "" '$INSTDIR\icons\${EXT}.ico'
   WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open" "FriendlyAppName" "${TITLE}"
   WriteRegStr HKCU "Software\Classes\${PROGID}\shell\open\command" "" '"$INSTDIR\SK Hub Office ${APP}.exe" "%1"'
   WriteRegStr HKCU "Software\SKHubOffice\Apps" "${APP}" "1"
@@ -59,6 +63,7 @@ VIAddVersionKey /LANG=1041 "LegalCopyright" "SK Hub"
 
 !macro UninstallApp APP EXT PROGID
   Delete "$INSTDIR\SK Hub Office ${APP}.exe"
+  Delete "$INSTDIR\icons\${EXT}.ico"
   Delete "$SMPROGRAMS\SK Hub Office ${APP}.lnk"
   DeleteRegKey HKCU "Software\Classes\${PROGID}"
   ReadRegStr $0 HKCU "Software\Classes\.${EXT}" ""
@@ -131,6 +136,7 @@ Section "Uninstall"
   !insertmacro UninstallApp "Sheet" "sksheet" "SKHubOffice.Sheet"
   !insertmacro UninstallApp "Slide" "skslide" "SKHubOffice.Slide"
   Delete "$INSTDIR\Uninstall.exe"
+  RMDir "$INSTDIR\icons"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "${UNINST_KEY}"
   DeleteRegKey HKCU "Software\SKHubOffice"

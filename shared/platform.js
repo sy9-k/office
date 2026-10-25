@@ -102,6 +102,62 @@
     document.addEventListener("visibilitychange", function () { if (!document.hidden) pull(); });
   }
 
+  // ---------- タイトルバーと「－ □ ×」の統合 ----------
+  //   デスクトップ版は Windows の標準のタイトルバーを使わない（Rust 側で decorations を切っている）。
+  //   かわりに、Office のタイトルバー（エディタの .titlebar・スタート画面の .wco-bar。Web 版の Window Controls Overlay と同じ）を帯にして、右の端に「－ □ ×」を置く
+  //   帯の何もないところをドラッグするとウィンドウが動き、ダブルクリックで最大化・元に戻す
+  //   office.js が <html class="is-wco"> を付け、office.css が帯の高さと右のあき（--wco-h・--wco-r）を決める
+  if (desktop && T.window && T.window.getCurrentWindow) {
+    var cur = T.window.getCurrentWindow();
+    var SVG = {
+      min: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" stroke-width="1" fill="none"/></svg>',
+      max: '<svg viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" stroke="currentColor" stroke-width="1" fill="none"/></svg>',
+      restore: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5V.5h7v7h-2M.5 2.5h7v7h-7z" stroke="currentColor" stroke-width="1" fill="none"/></svg>',
+      close: '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" stroke-width="1" fill="none"/></svg>'
+    };
+    var buildControls = function () {
+      if (document.querySelector(".win-ctrl")) return;
+      var box = document.createElement("div");
+      box.className = "win-ctrl";
+      box.innerHTML = '<button type="button" class="win-ctrl__b" data-win="min" aria-label="最小化" title="最小化">' + SVG.min + "</button>" +
+        '<button type="button" class="win-ctrl__b" data-win="max" aria-label="最大化" title="最大化">' + SVG.max + "</button>" +
+        '<button type="button" class="win-ctrl__b win-ctrl__b--close" data-win="close" aria-label="閉じる" title="閉じる">' + SVG.close + "</button>";
+      document.body.appendChild(box);
+      var maxBtn = box.querySelector('[data-win="max"]');
+      var syncMax = function () {
+        cur.isMaximized().then(function (m) {
+          maxBtn.innerHTML = m ? SVG.restore : SVG.max;
+          var label = m ? "元に戻す" : "最大化";
+          maxBtn.setAttribute("aria-label", label); maxBtn.title = label;
+          document.documentElement.classList.toggle("is-maximized", m);
+        }).catch(function () {});
+      };
+      box.addEventListener("click", function (e) {
+        var b = e.target.closest("[data-win]");
+        if (!b) return;
+        var w = b.getAttribute("data-win");
+        if (w === "min") cur.minimize();
+        else if (w === "max") cur.toggleMaximize().then(syncMax, syncMax);
+        else cur.close();
+      });
+      window.addEventListener("resize", syncMax);
+      syncMax();
+    };
+    // 帯の何もないところ（ボタン・リンク・入力欄の上ではないところ）をドラッグ → ウィンドウを動かす。ダブルクリック → 最大化・元に戻す
+    var DRAG = ".titlebar, .wco-bar";
+    var NO_DRAG = "button, a, input, select, textarea, label, [role=button], [role=menuitem], [contenteditable], .tbar-search, .tbar-name, .win-ctrl";
+    var inBar = function (e) { return e.button === 0 && e.target.closest && e.target.closest(DRAG) && !e.target.closest(NO_DRAG); };
+    document.addEventListener("mousedown", function (e) {
+      if (!inBar(e) || e.detail > 1) return;
+      cur.startDragging().catch(function () {});
+    });
+    document.addEventListener("dblclick", function (e) {
+      if (!inBar(e)) return;
+      cur.toggleMaximize().then(function () { window.dispatchEvent(new Event("resize")); }).catch(function () {});
+    });
+    if (document.body) buildControls(); else document.addEventListener("DOMContentLoaded", buildControls);
+  }
+
   // ウィンドウのタイトルを、画面の題名（ファイル名 — Doc | SK Hub Office）に合わせる
   if (desktop && T.window && T.window.getCurrentWindow) {
     var win = T.window.getCurrentWindow(), last = "";

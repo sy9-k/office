@@ -3,7 +3,7 @@
 //   インストーラーは installer/suite.nsi を、Tauri が取ってきた makensis（%LOCALAPPDATA%\tauri\NSIS）で作る
 //   使い方: npm run build:suite   （--skip-build で、前に作った stage/ だけをまとめなおす）
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -26,6 +26,8 @@ if (!process.argv.includes("--skip-build")) {
     copyFileSync(path.join(tauriDir, "target", "release", "sk-hub-office.exe"), path.join(stage, `${name}.exe`));
   }
 }
+// ファイルの種類のアイコン（installer/icons/*-file.ico。icons/src/sk-*-file.png から tauri icon で作ったもの）
+cpSync(path.join(desktop, "installer", "icons"), path.join(stage, "icons"), { recursive: true });
 for (const [, name] of APPS) if (!existsSync(path.join(stage, `${name}.exe`))) { console.error(`stage/${name}.exe がありません（--skip-build を外して作ってください）`); process.exit(1); }
 
 const makensis = path.join(process.env.LOCALAPPDATA || "", "tauri", "NSIS", "makensis.exe");

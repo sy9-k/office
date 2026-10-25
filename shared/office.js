@@ -177,8 +177,9 @@
   //   エディタは、タイトルバー（アプリのアイコン・保存・ファイル名・検索・共有・アカウント）をそのまま帯にする。
   //   スタート画面は、同じ色の帯（.wco-bar）を出す。見た目は office.css。タイトルバーの右の「∧」で、ふつうのタイトルバーに戻せる
   var wco = navigator.windowControlsOverlay;
-  function syncWco() { root.classList.toggle("is-wco", !!(wco && wco.visible)); }
-  if (wco) { syncWco(); wco.addEventListener("geometrychange", syncWco); }
+  // デスクトップ版は、標準のタイトルバーを使わず、いつも帯を Office のタイトルバーにする（右の「－ □ ×」は platform.js・office.css の .win-ctrl）
+  function syncWco() { root.classList.toggle("is-wco", DESKTOP || !!(wco && wco.visible)); root.classList.toggle("is-native-bar", DESKTOP); }
+  if (wco || DESKTOP) { syncWco(); if (wco) wco.addEventListener("geometrychange", syncWco); }
   // ウィンドウのボタン（閉じるなど）とアドレスバーの色を、アプリの色（タイトルバーの色）にそろえる
   function syncThemeColor() {
     var meta = document.querySelector('meta[name="theme-color"]');
