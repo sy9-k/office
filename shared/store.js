@@ -135,10 +135,68 @@
     function start() {
       var body = x.pending;
       x.pending = null; x.next = null;
-      x.running = Drive.save(id, body).then(function (m) { x.running = null; return m; }, function (e) { x.running = null; throw e; });
+      x.running = Drive.save(id, body).then(function (m) { x.running = null; unqueue(id); return m; }, function (e) {
+        x.running = null;
+        // つながらない（オフライン・サーバーの不調）ときは、あとで送る。ログインが切れたときは、つなぎなおしてもらうために失敗にするが、送れなかった分は残す
+        if (isRetryable(e)) { return enqueue(id, body).then(function () { return { queued: true }; }); }
+        if (e && e.message === "auth") { return enqueue(id, body).then(function () { throw e; }); }
+        throw e;
+      });
       return x.running;
     }
   }
+
+  // ---------- あとで送る（Google ドライブに送れなかった保存） ----------
+  //   デスクトップ版（platform.js の offlineQueue）は、IndexedDB に残すので、アプリを閉じても消えない。Web 版は、このページを開いているあいだだけ
+  //   つながったとき（online・1 分ごと・起動のとき）に、いちばん新しい中身を送る。ドライブ側で消えたファイルは、送らずに捨てる
+  var persistQ = !!(Platform && Platform.features.offlineQueue), memQ = {}, queuedIds = {}, flushing = null, flushTimer = null;
+  function isRetryable(e) { return !e || !e.status || e.status === 429 || e.status >= 500; }
+  function enqueue(id, text) {
+    queuedIds[id] = true;
+    scheduleFlush();
+    if (!persistQ) { memQ[id] = text; return Promise.resolve(); }
+    return idbSet("q:" + id, { text: text, ts: Date.now() }).catch(function () { memQ[id] = text; });
+  }
+  function unqueue(id) {
+    if (!queuedIds[id]) return;
+    delete queuedIds[id]; delete memQ[id];
+    if (persistQ) idb("readwrite", function (s) { return s.delete("q:" + id); }).catch(function () {});
+  }
+  function takeQueued(id) {
+    if (memQ[id] != null) return Promise.resolve(memQ[id]);
+    return idbGet("q:" + id).then(function (o) { return o ? o.text : null; }, function () { return null; });
+  }
+  function loadQueue() {
+    if (!persistQ) return Promise.resolve();
+    return idb("readonly", function (s) { return s.getAllKeys(); }).then(function (keys) {
+      (keys || []).forEach(function (k) { if (String(k).slice(0, 2) === "q:") queuedIds[String(k).slice(2)] = true; });
+      if (Object.keys(queuedIds).length) scheduleFlush();
+    }, function () {});
+  }
+  function scheduleFlush() {
+    if (flushTimer) return;
+    flushTimer = setInterval(function () { if (!Object.keys(queuedIds).length) { clearInterval(flushTimer); flushTimer = null; } else flushQueue(); }, 60000);
+  }
+  // 送る。1 つでもつながらなかったら、そこでやめる（次のときに続ける）。送れた数を返す
+  function flushQueue() {
+    if (flushing) return flushing;
+    if (!Drive || driveState() !== "ready" || navigator.onLine === false) return Promise.resolve(0);
+    var ids = Object.keys(queuedIds), sent = 0;
+    flushing = ids.reduce(function (p, id) {
+      return p.then(function (go) {
+        if (!go) return false;
+        return takeQueued(id).then(function (text) {
+          if (text == null) { delete queuedIds[id]; return true; }
+          return Drive.save(id, text).then(function () { sent++; unqueue(id); return true; }, function (e) {
+            if (e && e.status === 404) { unqueue(id); return true; } // ドライブで消えたファイル
+            return false;
+          });
+        });
+      });
+    }, Promise.resolve(true)).then(function () { flushing = null; if (sent && Store.onFlush) Store.onFlush(sent); return sent; }, function () { flushing = null; return 0; });
+    return flushing;
+  }
+  window.addEventListener("online", function () { flushQueue(); });
 
   var Store = {
     EXT: EXT,
@@ -154,8 +212,13 @@
     place: function () { var p = ""; try { p = localStorage.getItem(PLACE_KEY) || ""; } catch (e) { /* なし */ } return p === "drive" && driveState() !== "unconfigured" && driveState() !== "off" ? "drive" : "local"; },
     setPlace: function (p) { try { localStorage.setItem(PLACE_KEY, p === "drive" ? "drive" : "local"); } catch (e) { /* このページだけ */ } },
 
+    // あとで送る分（Google ドライブに送れなかった保存）の数。flushQueue() で送りなおす。送れたら onFlush(数) が呼ばれる
+    pending: function () { return Object.keys(queuedIds).length; },
+    flushQueue: flushQueue,
+
     // 前に選んだフォルダを読み出して、許可があるか確かめる
     init: function () {
+      loadQueue().then(function () { return flushQueue(); });
       if (!supported) return Promise.resolve(state);
       if (native) {
         // 前に選んだフォルダ。なければ ドキュメント\SK Hub Office。フォルダが消えていたら、最初のフォルダに戻す
@@ -283,7 +346,7 @@
     },
     save: function (f) {
       f.updated = Date.now();
-      if (isDrive(f.id)) return driveSave(gid(f.id), payload(f)).then(function () { return f; });
+      if (isDrive(f.id)) return driveSave(gid(f.id), payload(f)).then(function (r) { f.queued = !!(r && r.queued); return f; });
       if (isHandleId(f.id)) {
         var hd = handles[f.id], body = payload(f);
         if (!hd) return Promise.reject(new Error("closed"));

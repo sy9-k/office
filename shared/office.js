@@ -29,7 +29,7 @@
   // Office のいちばん上のパス。office.sk-hub.jp では "/"、sk-hub.jp（手元のサーバー）では "/office/"（このファイルの 1 つ上）
   var BASE = (function () { var s = document.currentScript; try { return s ? new URL("..", s.src).pathname : "/office/"; } catch (e) { return "/office/"; } })();
   // サイト（sk-hub.jp）のページへのリンク。office.sk-hub.jp からは sk-hub.jp を付ける
-  var SITE = /(^|\.)sk-hub\.jp$/.test(location.hostname) && !/^(www\.)?sk-hub\.jp$/.test(location.hostname) ? "https://sk-hub.jp" : "";
+  var SITE = (/(^|\.)sk-hub\.jp$/.test(location.hostname) && !/^(www\.)?sk-hub\.jp$/.test(location.hostname)) || (window.OfficePlatform && OfficePlatform.isDesktop) ? "https://sk-hub.jp" : "";
 
   var APPS = {
     doc: { name: "Doc", icon: "description", path: BASE + "doc/", untitled: t("無題の文書"), blank: t("白紙の文書") },
@@ -222,6 +222,50 @@
       return ok;
     }, function (e) { if (window.console) console.error(e); notify(t("Google ドライブにつなげませんでした。インターネットのつながりを確かめてください")); return false; });
   }
+  // あとで送る分が送れたとき（つながったとき）
+  Store.onFlush = function (n) {
+    notify(t("Google ドライブに {n} 件を送りました", { n: n }));
+    if (current && current.queued && Store.pending() === 0) { current.queued = false; setStatus(t("保存済み")); }
+  };
+
+  // ---------- SK Hub Systems アカウント（デスクトップ版: いつものブラウザでログイン） ----------
+  //   sk-hub.jp/account/?desktop=ポート&state=… でログインすると、ブラウザが 127.0.0.1:ポート に戻ってきて、ログイン中かのヒント（skhub_account）を渡す
+  //   Web 版は、いままでどおり sk-hub.jp のログインのページに移る（loginUrl）
+  function desktopLogin() {
+    var P = window.OfficePlatform, a = new Uint8Array(18), st = "";
+    crypto.getRandomValues(a);
+    a.forEach(function (b) { st += String.fromCharCode(b); });
+    st = btoa(st).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    notify(t("ブラウザでログインしてください"));
+    return P.externalLogin(SITE + "/account/?desktop={port}&state=" + st, 600).then(function (r) {
+      if (!r || r.state !== st || !r.hint) throw new Error("login");
+      var b64 = r.hint.replace(/-/g, "+").replace(/_/g, "/"), bin = atob(b64 + "===".slice((b64.length + 3) % 4)), bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var text = new TextDecoder().decode(bytes), o = JSON.parse(text);
+      if (!o || typeof o !== "object") throw new Error("login");
+      localStorage.setItem("skhub_account", text);
+      fillAvatars();
+      if ($("home") && !$("home").hidden) renderStart();
+      notify(t("ログインしました"));
+    }).catch(function (e) {
+      if (window.console) console.error(e);
+      notify(t("ログインできませんでした"));
+    });
+  }
+  // このアプリのログインの記録を外す（ブラウザ側のログインは、アカウントの管理のページで外せる）
+  function desktopLogout() {
+    try { localStorage.removeItem("skhub_account"); } catch (e) { /* なし */ }
+    fillAvatars();
+    if ($("home") && !$("home").hidden) renderStart();
+    notify(t("このアプリのログインを外しました"));
+  }
+  // デスクトップ版: 外のサイトのリンクは、画面の中ではなく、いつものブラウザで開く
+  if (DESKTOP) document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a[href]");
+    if (!a || !/^https?:/i.test(a.href) || a.origin === location.origin) return;
+    e.preventDefault();
+    OfficePlatform.openExternal(a.href).catch(function () { notify(t("リンクを開けませんでした")); });
+  });
   var asking = false;
   function askReconnect() {
     if (asking) return;
@@ -731,8 +775,8 @@
               "<small>" + esc(hint && hint.email ? hint.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div></div>" +
             '<div class="acct-links">' + (hint
               // ログイン中に ?next= 付きで開くと、すぐ戻ってきてしまうので、管理のページはそのまま開く（戻ってきたら、ログインの状態を読みなおす）
-              ? '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("ログアウト")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントの管理")) + "</a>"
-              : '<a href="' + esc(loginUrl()) + '"' + target + ">" + esc(t("ログイン")) + '</a><a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントを作る")) + "</a>") +
+              ? (DESKTOP ? '<button type="button" data-desktop-logout>' + esc(t("ログアウト")) + "</button>" : '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("ログアウト")) + "</a>") + '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントの管理")) + "</a>"
+              : (DESKTOP ? '<button type="button" data-desktop-login>' + esc(t("ログイン")) + "</button>" : '<a href="' + esc(loginUrl()) + '"' + target + ">" + esc(t("ログイン")) + "</a>") + '<a href="' + SITE + '/account/"' + blank + ">" + esc(t("アカウントを作る")) + "</a>") +
               '<button type="button" data-view="options">' + esc(t("名前を変更")) + "</button></div></section>" +
           '<section class="acct__sec"><h2 class="acct__h">' + esc(t("アカウントのプライバシー")) + "</h2>" +
             '<a class="acct-btn m3-state" href="' + SITE + '/policies/"' + blank + ">" + esc(t("プライバシーポリシー")) + "</a></section>" +
@@ -1147,7 +1191,7 @@
     dirty = false;
     setStatus(t("保存しています…"));
     return Store.save(f).then(function () {
-      if (current === f && !dirty) setStatus(t("保存済み"));
+      if (current === f && !dirty) setStatus(f.queued ? t("オフライン・つながったら Google ドライブに送ります") : t("保存済み"));
       // 10 分ごとに、版の履歴に残す
       if (Date.now() - lastVersion > 600000) { lastVersion = Date.now(); Store.addVersion(f.id, f.data); }
       return true;
@@ -1208,14 +1252,17 @@
           "<small>" + esc(h && h.email ? h.email : t("SK Hub Systems アカウントにログインしていません")) + "</small></div></div>" +
         '<div class="menu__sep" role="separator"></div>' +
         (h ? '<a class="menu__item m3-state" data-v="manage" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("manage_accounts") + '<span class="menu__label">' + esc(t("アカウントの管理")) + "</span></a>" +
-             '<a class="menu__item m3-state" data-v="logout" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></a>"
-           : '<a class="menu__item m3-state" data-v="login" href="' + esc(loginUrl()) + '">' + icon("login") + '<span class="menu__label">' + esc(t("ログイン")) + "</span></a>" +
+             (DESKTOP ? '<button type="button" class="menu__item m3-state" data-v="logout">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></button>"
+               : '<a class="menu__item m3-state" data-v="logout" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("logout") + '<span class="menu__label">' + esc(t("ログアウト")) + "</span></a>")
+           : (DESKTOP ? '<button type="button" class="menu__item m3-state" data-v="login">' : '<a class="menu__item m3-state" data-v="login" href="' + esc(loginUrl()) + '">') + icon("login") + '<span class="menu__label">' + esc(t("ログイン")) + (DESKTOP ? "</span></button>" : "</span></a>") +
              '<a class="menu__item m3-state" data-v="create" href="' + SITE + '/account/" target="_blank" rel="noopener">' + icon("person_add") + '<span class="menu__label">' + esc(t("アカウントを作る")) + "</span></a>") +
         '<button type="button" class="menu__item m3-state" data-v="name">' + icon("edit") + '<span class="menu__label">' + esc(t("名前を変更")) + "</span></button>" +
         '<button type="button" class="menu__item m3-state" data-v="account">' + icon("account_circle") + '<span class="menu__label">' + esc(t("アカウントの設定")) + "</span></button>";
       fillAvatars();
       box.addEventListener("click", function (e) { var b = e.target.closest("[data-v]"); if (b) done(b.getAttribute("data-v")); });
     }).then(function (v) {
+      if (DESKTOP && v === "login") return desktopLogin();
+      if (DESKTOP && v === "logout") return desktopLogout();
       if (v === "name" || v === "account") { flush(); view = v === "name" ? "options" : "account"; renderStart(); show("home"); }
     });
   }
@@ -1394,7 +1441,7 @@
         if (!ok) return;
         lastVersion = Date.now();
         Store.addVersion(current.id, current.data);
-        notify(current.place === "drive" ? t("Google ドライブに保存しました") : current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
+        notify(current.queued ? t("オフラインです。つながったら Google ドライブに送ります") : current.place === "drive" ? t("Google ドライブに保存しました") : current.outside ? t("ファイルに保存しました") : Store.state() === "ready" ? t("フォルダ「{folder}」に保存しました", { folder: Store.folderName() }) : t("このブラウザに保存しました"));
       });
       return;
     }
@@ -1482,6 +1529,8 @@
       return;
     }
     if ((el = e.target.closest("[data-place]"))) { setPlace(el.getAttribute("data-place")); return; }
+    if (e.target.closest("[data-desktop-login]")) { desktopLogin(); return; }
+    if (e.target.closest("[data-desktop-logout]")) { desktopLogout(); return; }
     if (e.target.closest("[data-drive-connect]")) { connectDrive().then(function (ok) { if (ok) afterFolder(); }); return; }
     if (e.target.closest("[data-drive-disconnect]")) {
       M3.confirm({ title: t("Google ドライブを外しますか？"), text: t("Google ドライブのファイルは消えません。つなぎなおすと、また開けます。"), ok: t("外す"), icon: "link_off" }).then(function (ok) {

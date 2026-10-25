@@ -237,6 +237,174 @@ async fn new_window(app: tauri::AppHandle, page: String, hash: Option<String>) -
     open_window(&app, &page, hash.as_deref(), None)
 }
 
+// ---------- 外部ブラウザでのログイン ----------
+// 画面（WebView）のポップアップは使わず、いつものブラウザでログインしてもらう（RFC 8252 のループバック方式）
+//   1. 127.0.0.1 の空いているポートで待ちうけ、URL の {port}・{redirect} をそれに置きかえてブラウザで開く
+//   2. ログインが終わると、ブラウザが http://127.0.0.1:ポート/callback?… に戻ってくる。その検索文字列（code・state・hint など）を画面に返す
+// 開けるのは、SK Hub Systems（sk-hub.jp）と Google のログインのページだけ
+
+static LOGIN_GEN: AtomicUsize = AtomicUsize::new(0);
+
+fn login_host_ok(url: &url::Url) -> bool {
+    url.scheme() == "https"
+        && url
+            .host_str()
+            .map(|h| h == "accounts.google.com" || h == "sk-hub.jp" || h.ends_with(".sk-hub.jp"))
+            .unwrap_or(false)
+}
+
+const DONE_PAGE: &str = "<!doctype html><html lang=\"ja\"><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>SK Hub Office</title><body style=\"font-family:system-ui,'Yu Gothic',sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#faf8ff;color:#1a1c20\"><div style=\"text-align:center;padding:24px\"><h1 style=\"font-size:20px\">ログインしました</h1><p>このタブを閉じて、SK Hub Office に戻ってください。</p></div></body></html>";
+
+#[tauri::command]
+async fn external_login(
+    app: tauri::AppHandle,
+    url_template: String,
+    timeout_secs: u64,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::io::{Read, Write};
+    let mine = LOGIN_GEN.fetch_add(1, Ordering::SeqCst) + 1; // 前の待ちうけは、ここで終わる
+    tauri::async_runtime::spawn_blocking(move || {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|e| e.to_string())?;
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        let redirect = format!("http://127.0.0.1:{port}/callback");
+        let encoded: String = url::form_urlencoded::byte_serialize(redirect.as_bytes()).collect();
+        let target = url::Url::parse(&url_template.replace("{port}", &port.to_string()).replace("{redirect}", &encoded))
+            .map_err(|e| e.to_string())?;
+        if !login_host_ok(&target) {
+            return Err("bad-login-url".into());
+        }
+        tauri_plugin_opener::OpenerExt::opener(&app)
+            .open_url(target.as_str(), None::<&str>)
+            .map_err(|e| e.to_string())?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs.clamp(10, 900));
+        loop {
+            if LOGIN_GEN.load(Ordering::SeqCst) != mine {
+                return Err("cancelled".into());
+            }
+            if std::time::Instant::now() > deadline {
+                return Err("timeout".into());
+            }
+            let (mut stream, _) = match listener.accept() {
+                Ok(s) => s,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    continue;
+                }
+                Err(e) => return Err(e.to_string()),
+            };
+            let _ = stream.set_nonblocking(false);
+            let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+            let mut buf = [0u8; 8192];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let head = String::from_utf8_lossy(&buf[..n]);
+            let path = head.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("/");
+            let parsed = url::Url::parse(&format!("http://127.0.0.1{path}")).ok();
+            let params: std::collections::HashMap<String, String> = parsed
+                .as_ref()
+                .filter(|u| u.path() == "/callback")
+                .map(|u| u.query_pairs().map(|(k, v)| (k.into_owned(), v.into_owned())).collect())
+                .unwrap_or_default();
+            let (status, body) = if params.is_empty() { ("404 Not Found", "") } else { ("200 OK", DONE_PAGE) };
+            let _ = write!(
+                stream,
+                "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n{body}",
+                body.len()
+            );
+            if !params.is_empty() {
+                let mut params = params;
+                params.insert("_redirect".into(), redirect.clone()); // トークンを取るときに、同じ redirect_uri を送る
+                return Ok(params);
+            }
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// 画面の中のリンク（SK Hub のアカウントの管理・ポリシーなど）を、いつものブラウザで開く。開けるのは sk-hub.jp だけ
+#[tauri::command]
+fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let u = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    let ok = u.scheme() == "https" && u.host_str().map(|h| h == "sk-hub.jp" || h.ends_with(".sk-hub.jp")).unwrap_or(false);
+    if !ok {
+        return Err("bad-url".into());
+    }
+    tauri_plugin_opener::OpenerExt::opener(&app).open_url(u.as_str(), None::<&str>).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn external_login_cancel() {
+    LOGIN_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
+// ---------- Google のトークン ----------
+// リフレッシュトークンは Windows の資格情報マネージャー（OS の保管庫）に入れ、画面（JS）には渡さない
+const KEYRING_SERVICE: &str = "jp.sk-hub.office";
+const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+fn refresh_entry() -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYRING_SERVICE, "google-refresh-token").map_err(|e| e.to_string())
+}
+
+fn http_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .build()
+        .into()
+}
+
+// code を access_token に替える・保管したリフレッシュトークンで access_token を取りなおす。返すのは access_token・expires_in・error だけ
+#[tauri::command]
+async fn google_token(params: std::collections::HashMap<String, String>, use_stored_refresh: bool) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        const KEYS: [&str; 6] = ["grant_type", "code", "code_verifier", "redirect_uri", "client_id", "client_secret"];
+        let mut form: Vec<(String, String)> = params.into_iter().filter(|(k, _)| KEYS.contains(&k.as_str())).collect();
+        if use_stored_refresh {
+            let rt = refresh_entry()?.get_password().map_err(|_| "no-refresh-token".to_string())?;
+            form.push(("refresh_token".into(), rt));
+        }
+        let pairs: Vec<(&str, &str)> = form.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let mut res = http_agent().post(GOOGLE_TOKEN_URL).send_form(pairs).map_err(|e| e.to_string())?;
+        let status = res.status().as_u16();
+        let body: serde_json::Value = res.body_mut().read_json().map_err(|e| e.to_string())?;
+        if let Some(rt) = body.get("refresh_token").and_then(|v| v.as_str()) {
+            refresh_entry()?.set_password(rt).map_err(|e| e.to_string())?;
+        }
+        if status >= 400 {
+            // リフレッシュトークンが取り消された・切れた: 保管したものを消して、つなぎなおしてもらう
+            if use_stored_refresh && body.get("error").and_then(|v| v.as_str()) == Some("invalid_grant") {
+                let _ = refresh_entry()?.delete_credential();
+            }
+            return Ok(serde_json::json!({ "error": body.get("error").cloned().unwrap_or(serde_json::json!("token-error")) }));
+        }
+        Ok(serde_json::json!({ "access_token": body.get("access_token"), "expires_in": body.get("expires_in") }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn google_has_refresh() -> bool {
+    refresh_entry().and_then(|e| e.get_password().map_err(|e| e.to_string())).is_ok()
+}
+
+// つなぎを外す（保管したリフレッシュトークンを取り消して消す）
+#[tauri::command]
+async fn google_signout() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let entry = refresh_entry()?;
+        if let Ok(rt) = entry.get_password() {
+            let _ = http_agent().post("https://oauth2.googleapis.com/revoke").send_form([("token", rt.as_str())]);
+        }
+        let _ = entry.delete_credential();
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 // ---------- システムフォント ----------
 // PC に入っているフォントの名前の一覧（重複なし・五十音と ABC 順）
 #[tauri::command]
@@ -345,12 +513,19 @@ pub fn run() {
             open_files_or_hub(app, office_files(argv.into_iter().skip(1)));
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             open_files_or_hub(app.handle(), office_files(std::env::args().skip(1)));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             new_window,
+            external_login,
+            external_login_cancel,
+            open_external,
+            google_token,
+            google_has_refresh,
+            google_signout,
             system_fonts,
             pick_pdf_path,
             print_pdf,

@@ -16,7 +16,10 @@
       launchFiles: desktop,   // .skdoc などをダブルクリックして起動する（起動したウィンドウに渡るファイルは openArgs）
       multiWindow: desktop,   // 別のウィンドウで開く（openWindow）
       systemFonts: desktop,   // PC に入っているフォントすべて（systemFonts）
-      silentPdf: desktop      // 印刷のダイアログなしで PDF に書き出す（savePdf）
+      silentPdf: desktop,     // 印刷のダイアログなしで PDF に書き出す（savePdf）
+      externalLogin: desktop, // いつものブラウザでログインする（SK Hub Systems・Google。externalLogin）
+      secureTokens: desktop,  // Google ドライブの長いログイン（リフレッシュトークン）を OS の保管庫に入れ、1 時間で切れない
+      offlineQueue: desktop   // オフラインで保存した Google ドライブのファイルを、このアプリを閉じても覚えておき、つながったら送る
     },
     // 起動で渡されたファイルのパス（ダブルクリックしたとき。Rust がウィンドウを開くときに入れる）
     openArgs: desktop && Array.isArray(window.__SK_OPEN__) ? window.__SK_OPEN__ : [],
@@ -29,6 +32,15 @@
       var page = app === "doc" || app === "sheet" || app === "slide" ? app + "/index.html" : "index.html";
       return Platform.invoke("new_window", { page: page, hash: fileId ? "f=" + encodeURIComponent(fileId) : null });
     },
+    // いつものブラウザでログインする。urlTemplate の {port}・{redirect} は、このアプリが待っているアドレスに置きかわる
+    //   ログインが終わってブラウザが戻ってきたときの検索文字列（code・state・hint…と、_redirect）を返す。やめた・時間切れは reject
+    externalLogin: function (urlTemplate, timeoutSecs) { return Platform.invoke("external_login", { urlTemplate: urlTemplate, timeoutSecs: timeoutSecs || 600 }); },
+    cancelLogin: function () { return Platform.invoke("external_login_cancel"); },
+    openExternal: function (url) { return Platform.invoke("open_external", { url: url }); },
+    // Google のトークン（リフレッシュトークンは Rust が OS の保管庫に入れ、ここには来ない）
+    googleToken: function (params, useStoredRefresh) { return Platform.invoke("google_token", { params: params, useStoredRefresh: !!useStoredRefresh }); },
+    googleHasRefresh: function () { return Platform.invoke("google_has_refresh"); },
+    googleSignout: function () { return Platform.invoke("google_signout"); },
     // PC に入っているフォントの名前（五十音と ABC 順）
     systemFonts: function () { return Platform.invoke("system_fonts"); },
     // 印刷用の見た目にしたあとの画面を、PDF にして保存する。css は @page のある印刷用の CSS（用紙の大きさを読む）
