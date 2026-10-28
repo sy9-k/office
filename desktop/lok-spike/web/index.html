@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOKit の WebView 試作</title>
+<style>
+  :root { --bg: #f2f2f2; --ink: #222; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1e1e1e; --ink: #eee; --muted: #aaa; } }
+  :root[data-theme="dark"] { --bg: #1e1e1e; --ink: #eee; --muted: #aaa; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Yu Gothic UI", "Meiryo", sans-serif; }
+  header { padding: 8px 16px; font-size: 13px; color: var(--muted); }
+  #viewport { height: calc(100vh - 80px); overflow-y: auto; display: flex; justify-content: center; }
+  #page { display: block; width: 794px; height: 1123px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); cursor: text; }
+  #ime { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
+  #log { font-family: Consolas, monospace; font-size: 12px; white-space: pre; padding: 4px 16px; color: var(--muted); height: 60px; overflow: hidden; }
+</style>
+</head>
+<body>
+<header>クリックして入力。日本語は IME で入力できる。ホイールで送る</header>
+<div id="viewport"><img id="page" alt="文書" draggable="false"></div>
+<textarea id="ime" aria-label="入力"></textarea>
+<div id="log"></div>
+<script>
+  // LOKit のサーバー（同じ場所から配信している）
+  const W = 794, H = 1123;
+  const page = document.getElementById('page');
+  const ime = document.getElementById('ime');
+  const viewport = document.getElementById('viewport');
+  const logEl = document.getElementById('log');
+  let yPx = 0;          // 表示の一番上（px。twips は 15 倍）
+  let timer = null;
+  let renderSeq = 0;
+
+  function log(msg) {
+    logEl.textContent = (msg + '\n' + logEl.textContent).split('\n').slice(0, 4).join('\n');
+  }
+
+  // 文字列 → 16 進のコードポイント列（「,」区切り）
+  function hexList(s) {
+    return Array.from(s).map(c => c.codePointAt(0).toString(16).toUpperCase()).join(',');
+  }
+
+  async function post(path) {
+    const t0 = performance.now();
+    const res = await fetch(path, { method: 'POST' });
+    return performance.now() - t0;
+  }
+
+  // 入力のあとは描画が遅れて終わるので、少し待ってから描き直す
+  function scheduleRender(delay = 300) {
+    clearTimeout(timer);
+    timer = setTimeout(render, delay);
+  }
+
+  async function render() {
+    const seq = ++renderSeq;
+    const t0 = performance.now();
+    const res = await fetch(`/tile?y=${yPx * 15}&w=${W}&h=${H}`);
+    if (!res.ok) { log('描画に失敗: ' + res.status); return; }
+    const blob = await res.blob();
+    if (seq !== renderSeq) return; // もっと新しい描画があるならこれは捨てる
+    const old = page.dataset.url;
+    page.src = URL.createObjectURL(blob);
+    if (old) URL.revokeObjectURL(old);
+    page.dataset.url = page.src;
+    log(`描画 ${(performance.now() - t0).toFixed(0)} ms（y=${yPx}px）`);
+  }
+
+  // キー入力（IME の変換中は除く）
+  ime.addEventListener('keydown', async (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length !== 1) return; // 特殊キーは次の段階で扱う
+    e.preventDefault();
+    const cp = e.key.codePointAt(0).toString(16).toUpperCase();
+    const ms = await post(`/key?type=0&cp=${cp}`);
+    await post(`/key?type=1&cp=${cp}`);
+    log(`キー ${e.key}（送信 ${ms.toFixed(1)} ms）`);
+    scheduleRender();
+  });
+
+  // 変換中（確定の前の文字）
+  ime.addEventListener('compositionupdate', async (e) => {
+    const ms = await post(`/ime?type=0&text=${hexList(e.data)}`);
+    log(`変換中 ${e.data}（送信 ${ms.toFixed(1)} ms）`);
+    scheduleRender();
+  });
+
+  // 確定。確定する文字を変換中として送ってから、確定を送る（LOKit の仕様に合わせる）
+  ime.addEventListener('compositionend', async (e) => {
+    const list = hexList(e.data);
+    await post(`/ime?type=0&text=${list}`);
+    await post(`/ime?type=2&text=${list}`);
+    ime.value = '';
+    log(`確定 ${e.data}`);
+    scheduleRender();
+  });
+
+  // keydown を通らずに届いた文字（貼りつけ・音声入力など）。変換中は除く
+  ime.addEventListener('input', async (e) => {
+    if (e.isComposing || !ime.value) return;
+    const text = ime.value;
+    ime.value = '';
+    for (const ch of text) {
+      const cp = ch.codePointAt(0).toString(16).toUpperCase();
+      await post(`/key?type=0&cp=${cp}`);
+      await post(`/key?type=1&cp=${cp}`);
+    }
+    log(`入力 ${text}`);
+    scheduleRender();
+  });
+
+  page.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    ime.focus({ preventScroll: true });
+  });
+
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    yPx = Math.max(0, yPx + Math.sign(e.deltaY) * 120);
+    scheduleRender(0);
+  }, { passive: false });
+
+  ime.focus({ preventScroll: true });
+  render();
+</script>
+</body>
+</html>
