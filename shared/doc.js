@@ -1083,6 +1083,7 @@
     var SYMBOLS = ["※", "・", "〒", "〇", "◎", "△", "□", "■", "◆", "★", "☆", "→", "←", "↑", "↓", "①", "②", "③", "④", "⑤", "℃", "￥", "§", "¶", "©", "®", "™", "±", "×", "÷", "≠", "≦", "≧", "∞", "♪", "々", "〃", "〆"];
     function command(cmd, at) {
       if (!page) return;
+      if (cmd === "lokView") return lokView();
       var ro = readOnly && !/^(nav|comments|count|toc:update)$/.test(cmd);
       if (ro) { O.notify(t("閲覧モードでは書きかえられません")); return; }
       if (cmd === "designMenu") {
@@ -1727,6 +1728,38 @@
       });
       return out;
     }
+    // LibreOffice で表示（デスクトップ版・試作）: 今の文書を docx にして、LOKit のサーバーに開かせ、その画面を重ねて見せる
+    function lokView() {
+      sync();
+      return docxFiles().then(Zip.write).then(function (b) {
+        return b.arrayBuffer();
+      }).then(function (ab) {
+        return window.OfficePlatform.lokPreview(Array.prototype.slice.call(new Uint8Array(ab)));
+      }).then(showLokPanel).catch(function (e) {
+        O.notify(t("LibreOffice で表示できませんでした") + "：" + (e && e.message ? e.message : e));
+      });
+    }
+    function showLokPanel(url) {
+      // 古い画面だけ消す（サーバーは、いま起動したものなので止めない）
+      var old = document.getElementById("lok-panel");
+      if (old) old.remove();
+      var box = document.createElement("div");
+      box.id = "lok-panel";
+      box.style.cssText = "position:fixed;inset:0;z-index:9000;background:#f2f2f2;display:flex;flex-direction:column";
+      // 閉じるボタンは左に置く（右上はウィンドウの「×」と重なって、押すとアプリごと閉じるため）
+      box.innerHTML = '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:#fff;border-bottom:1px solid #ddd;font-size:13px"><button type="button" id="lok-close">' + esc(t("閉じる")) + '</button><b>' + esc(t("LibreOffice で表示（試作）")) + '</b><span style="color:#666">' + esc(t("描画と入力は LibreOffice の処理")) + "</span></div>";
+      var frame = document.createElement("iframe");
+      frame.src = url;
+      frame.style.cssText = "flex:1;border:0;width:100%";
+      box.appendChild(frame);
+      document.body.appendChild(box);
+      document.getElementById("lok-close").addEventListener("click", closeLokPanel);
+    }
+    function closeLokPanel() {
+      var box = document.getElementById("lok-panel");
+      if (box) box.remove();
+      if (window.OfficePlatform && OfficePlatform.features.lokPreview) OfficePlatform.lokStop().catch(function () {});
+    }
     function exportAs(id) {
       sync();
       if (id === "docx") {
@@ -2232,6 +2265,13 @@
     function thumb(d) {
       var html = String(d.html || "").replace(/<img[^>]*>/gi, '<span class="th-img"></span>').replace(/<svg[\s\S]*?<\/svg>/gi, '<span class="th-img"></span>');
       return '<div class="th th--doc" aria-hidden="true"><div class="th-doc">' + sanitize(html) + "</div></div>";
+    }
+
+    // デスクトップ版だけ: 「表示」タブに LibreOffice で表示（試作）を足す
+    if (window.OfficePlatform && OfficePlatform.features.lokPreview) {
+      ribbon.forEach(function (tb) {
+        if (tb.tab === t("表示")) tb.groups.push({ label: "LibreOffice", items: [{ big: 1, icon: "visibility", label: t("LibreOffice で表示"), cmd: "lokView" }] });
+      });
     }
 
     return {

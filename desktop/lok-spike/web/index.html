@@ -116,14 +116,24 @@
     ime.focus({ preventScroll: true });
   });
 
+  // 文書の高さ（px）。表示の位置がこれを超えないようにする（超えると黒い画面になる）
+  let docPx = 0;
+  async function loadSize() {
+    try {
+      const s = await (await fetch('/size')).json();
+      docPx = Math.ceil(s.h / 15);
+    } catch (e) { log('文書の大きさを取れませんでした'); }
+  }
+
   viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
-    yPx = Math.max(0, yPx + Math.sign(e.deltaY) * 120);
+    const maxY = Math.max(0, docPx - H);
+    yPx = Math.min(maxY, Math.max(0, yPx + Math.sign(e.deltaY) * 120));
     scheduleRender(0);
   }, { passive: false });
 
   ime.focus({ preventScroll: true });
-  render();
+  loadSize().then(render);
 </script>
 </body>
 </html>
