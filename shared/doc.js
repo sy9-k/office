@@ -1728,6 +1728,7 @@
       });
       return out;
     }
+    var lokMsg = null; // パネルの保存を受け取る処理（パネルを閉じるときに外す）
     // LibreOffice で表示（デスクトップ版・試作）: 今の文書を docx にして、LOKit のサーバーに開かせ、その画面を重ねて見せる
     function lokView() {
       sync();
@@ -1754,10 +1755,19 @@
       box.appendChild(frame);
       document.body.appendChild(box);
       document.getElementById("lok-close").addEventListener("click", closeLokPanel);
+      // パネルの「保存」: LibreOffice が書き出した docx を受けて、新しい Doc として開く（今の Doc は置きかえない）
+      lokMsg = function (e) {
+        if (e.source !== frame.contentWindow || !e.data || e.data.type !== "lok-saved") return;
+        var f = new File([e.data.bytes], t("LibreOffice で保存") + ".docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+        if (window.OfficeOpenForeign) window.OfficeOpenForeign(f);
+      };
+      window.addEventListener("message", lokMsg);
     }
     function closeLokPanel() {
       var box = document.getElementById("lok-panel");
       if (box) box.remove();
+      if (lokMsg) window.removeEventListener("message", lokMsg);
+      lokMsg = null;
       if (window.OfficePlatform && OfficePlatform.features.lokPreview) OfficePlatform.lokStop().catch(function () {});
     }
     function exportAs(id) {

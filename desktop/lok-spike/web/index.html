@@ -24,6 +24,7 @@
 </head>
 <body>
 <header>
+  <button type="button" id="save-btn" title="この内容を、新しい Doc として開く">保存（新しい Doc）</button>
   <button type="button" data-uno=".uno:Undo" title="Ctrl+Z">元に戻す</button>
   <button type="button" data-uno=".uno:Redo" title="Ctrl+Y">やり直す</button>
   <button type="button" data-uno=".uno:Bold" title="Ctrl+B"><b>B</b></button>
@@ -136,6 +137,19 @@
     await post(`/uno?cmd=${cmd}`);
     scheduleRender();
   }
+  // 保存: 書き出した docx を取って、このパネルを開いたアプリの画面（親）に渡す。親が新しい Doc として開く
+  document.getElementById('save-btn').addEventListener('click', async () => {
+    try {
+      const r = await fetch('/save', { method: 'POST' });
+      if (!r.ok) throw new Error('save ' + r.status);
+      const bytes = await (await fetch('/saved.docx')).arrayBuffer();
+      window.parent.postMessage({ type: 'lok-saved', bytes }, '*', [bytes]);
+      log('保存しました（新しい Doc として開きます）');
+    } catch (e) {
+      log('保存できませんでした: ' + e.message);
+    }
+  });
+
   document.querySelectorAll('[data-uno]').forEach((b) => {
     b.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても文字の入力先を失わない
     b.addEventListener('click', () => uno(b.dataset.uno));

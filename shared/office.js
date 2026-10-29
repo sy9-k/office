@@ -1100,6 +1100,8 @@
       notify(e && e.message === "no-inflate" ? t("このブラウザでは、このファイルを読み込めません") : t("読み込めませんでした。ファイルがこわれているかもしれません"));
     });
   }
+  // 試作（LibreOffice の保存）から、docx を新しい Doc として開くために公開する
+  window.OfficeOpenForeign = importForeign;
   // デスクトップ版: Windows の「開く」のダイアログで選んで、そのファイルを、そのまま（コピーを作らずに）開く
   //   同じアプリのファイルは、いまのウィンドウで 1 つ目を開く。ほかは、新しいウィンドウ（ほかのアプリのファイルは、そのアプリのページで）
   function openWithDialog() {

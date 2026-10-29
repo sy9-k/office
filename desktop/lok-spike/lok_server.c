@@ -24,6 +24,9 @@ typedef LibreOfficeKit *(*HookFn)(const char *install_path, const char *user_pro
 static LibreOfficeKit *g_kit;
 static LibreOfficeKitDocument *g_doc;
 static char g_web_dir[MAX_PATH * 2];
+static char g_doc_abs[MAX_PATH * 2];   // 開いた文書のパス（保存先は、ここに「.saved.docx」を付けたもの）
+static char g_saved_abs[MAX_PATH * 2]; // 直近の保存先（書き出したあと、/saved.docx で返す）
+static int g_saved_ok;
 
 // LOKit のコールバックの種類（LibreOfficeKitEnums.h の値。C から読むので、ここに写す）
 #define LOK_CB_INVALIDATE_TILES 0          // 描画が変わった
@@ -208,6 +211,33 @@ static void handle_request(SOCKET s, const char *method, const char *target) {
         send_text(s, "400 Bad Request", "command not allowed");
         return;
     }
+    if (strcmp(path, "/save") == 0 && strcmp(method, "POST") == 0) {
+        // 今の内容を docx に書き出す（LibreOffice の書き出しを使う）。保存先は文書の隣の「.saved.docx」
+        char url[MAX_PATH * 4];
+        snprintf(g_saved_abs, sizeof g_saved_abs, "%s.saved.docx", g_doc_abs);
+        to_file_url(g_saved_abs, url, sizeof url);
+        // 形式は NULL にして、保存先の拡張子（.docx）から LibreOffice に決めさせる
+        int ok = g_doc->pClass->saveAs(g_doc, url, NULL, NULL);
+        g_saved_ok = ok ? 1 : 0;
+        send_text(s, ok ? "200 OK" : "500 Internal Server Error", ok ? "ok" : "save failed");
+        return;
+    }
+    if (strcmp(path, "/saved.docx") == 0) {
+        FILE *f = g_saved_ok ? fopen(g_saved_abs, "rb") : NULL;
+        if (!f) { send_text(s, "404 Not Found", "not saved yet"); return; }
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *body = malloc((size_t)n);
+        if (body && fread(body, 1, (size_t)n, f) == (size_t)n) {
+            send_response(s, "200 OK", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", body, (size_t)n);
+        } else {
+            send_text(s, "500 Internal Server Error", "read failed");
+        }
+        free(body);
+        fclose(f);
+        return;
+    }
     if (strcmp(path, "/key") == 0 && strcmp(method, "POST") == 0) {
         // cp: 文字のコードポイント（16 進）。kc: 特殊キーの番号（css::awt::Key。Enter は 1280 など。0 なら使わない）
         get_param(query, "type", p1, sizeof p1);
@@ -305,6 +335,7 @@ int main(int argc, char **argv) {
 
     to_file_url(profile, profile_url, sizeof profile_url);
     GetFullPathNameA(doc_path, sizeof doc_abs, doc_abs, NULL);
+    snprintf(g_doc_abs, sizeof g_doc_abs, "%s", doc_abs);
     to_file_url(doc_abs, doc_url, sizeof doc_url);
 
     g_kit = hook(prog, profile_url);
