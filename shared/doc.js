@@ -182,6 +182,8 @@
 
     // ---------- いまの状態 ----------
     var data = null, page = null, saved = null, readOnly = false, imgSel = null, painter = null;
+    // デスクトップ版は本文を LibreOffice（shared/doc-lok.js）にする
+    var LOK = !!(window.OfficePlatform && OfficePlatform.features.lokPreview && window.OfficeDocLok), lokDoc = null;
     var showNav = false, showCmts = false, zoomZ = 1;
     function el(id) { return $(id); }
     function sync() { if (!page) return; data.html = page.innerHTML; }
@@ -221,6 +223,7 @@
 
     // ---------- 画面を作る ----------
     function render(opts) {
+      if (LOK) return renderLok();
       data = O.data();
       upgrade(data);
       var caret = opts && opts.restore ? caretOffset() : null, sy = el("doc-scroll") ? el("doc-scroll").scrollTop : 0;
@@ -1082,6 +1085,7 @@
     // ---------- リボンのボタン ----------
     var SYMBOLS = ["※", "・", "〒", "〇", "◎", "△", "□", "■", "◆", "★", "☆", "→", "←", "↑", "↓", "①", "②", "③", "④", "⑤", "℃", "￥", "§", "¶", "©", "®", "™", "±", "×", "÷", "≠", "≦", "≧", "∞", "♪", "々", "〃", "〆"];
     function command(cmd, at) {
+      if (LOK) return lokCommand(cmd);
       if (!page) return;
       var ro = readOnly && !/^(nav|comments|count|toc:update)$/.test(cmd);
       if (ro) { O.notify(t("閲覧モードでは書きかえられません")); return; }
@@ -1727,6 +1731,47 @@
       });
       return out;
     }
+    function bytesToB64(u8) {
+      var s = "";
+      for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return btoa(s);
+    }
+    function b64ToBytes(b64) {
+      var s = atob(b64), u8 = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+      return u8;
+    }
+    // ---------- デスクトップ版: 本文は LibreOffice（shared/doc-lok.js） ----------
+    // 保存の前に、LibreOffice の内容を docx にして、ファイルの中に入れる（lokDocx）
+    function lokSave() {
+      if (!lokDoc) return Promise.resolve();
+      return lokDoc.save().then(function (u8) { data.lokDocx = bytesToB64(u8); });
+    }
+    // 太字・斜体・下線は、Ctrl＋文字のキーで送る。ほかの命令は、まだ LibreOffice の画面では使えない
+    function lokCommand(cmd) {
+      var keys = { bold: "b", italic: "i", underline: "u" };
+      if (keys[cmd]) { if (lokDoc) lokDoc.ctrl(keys[cmd]); return; }
+      O.notify(t("この操作は、まだ LibreOffice の画面では使えません"));
+    }
+    function lokClose() { if (lokDoc) { lokDoc.dispose(); lokDoc = null; } }
+    // 本文の画面を、LibreOffice の部品で作る。docx があればそれを開き、無ければ今の内容から docx を作る
+    function renderLok() {
+      data = O.data();
+      upgrade(data);
+      lokClose();
+      page = null; imgSel = null; painter = null;
+      $("canvas").innerHTML = '<div id="doc-lok-host" style="height:100%;min-height:0"></div>';
+      var bytes = data.lokDocx ? Promise.resolve(b64ToBytes(data.lokDocx)) :
+        docxFiles().then(Zip.write).then(function (b) { return b.arrayBuffer(); }).then(function (ab) { return new Uint8Array(ab); });
+      return bytes.then(function (u8) {
+        if (!$("doc-lok-host")) return; // もう別の画面になっていたら、何もしない
+        lokDoc = window.OfficeDocLok($("doc-lok-host"), u8, { onChange: function () { O.changed(true); } });
+        return lokDoc.ready;
+      }).catch(function (e) {
+        O.notify(t("LibreOffice の画面を開けませんでした") + "：" + (e && e.message ? e.message : e));
+      });
+    }
+
     function exportAs(id) {
       sync();
       if (id === "docx") {
@@ -2248,8 +2293,8 @@
       defaultZoom: function () { var sc = $("canvas"), d = dims(pageOf(O.data() || {})); return sc && sc.clientWidth && sc.clientWidth < d.w + 48 ? Math.max(0.4, Math.floor((sc.clientWidth - 24) / d.w * 20) / 20) : 1; },
       focus: function () { back(); },
       open: function () { showNav = false; showCmts = false; },
-      close: function () { page = null; imgSel = null; },
-      beforeSave: sync,
+      close: function () { lokClose(); page = null; imgSel = null; },
+      beforeSave: function () { return LOK ? lokSave() : sync(); },
       beforeUndo: function () { sync(); },
       setRead: function (on) { readOnly = on; if (page) page.contentEditable = on ? "false" : "true"; ["doc-head", "doc-foot"].forEach(function (id) { if (el(id)) el(id).readOnly = on; }); if (on) selectImg(null); stat(); },
       selectedText: function () { var s = getSelection(); return s.rangeCount && inPage(s.anchorNode) ? s.toString() : ""; },
