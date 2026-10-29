@@ -25,6 +25,30 @@ static LibreOfficeKit *g_kit;
 static LibreOfficeKitDocument *g_doc;
 static char g_web_dir[MAX_PATH * 2];
 
+// LOKit のコールバックの種類（LibreOfficeKitEnums.h の値。C から読むので、ここに写す）
+#define LOK_CB_INVALIDATE_TILES 0          // 描画が変わった
+#define LOK_CB_INVALIDATE_VISIBLE_CURSOR 1 // カーソルの位置（payload: "x, y, w, h"・twips）
+#define LOK_CB_TEXT_SELECTION 2            // 選択の範囲（payload: "x, y, w, h; x, y, w, h; …"・twips。選択がないと空）
+
+// カーソルの位置（twips）と、描画が変わった回数。コールバックで更新する
+static int g_cursor_valid;
+static long g_cursor_x, g_cursor_y, g_cursor_w, g_cursor_h;
+static unsigned long g_dirty;
+static char g_selection[4096]; // 選択の範囲（そのまま JSON に入れる。数字・「,」「;」「空白」だけ）
+
+static void on_lok_callback(int type, const char *payload, void *data) {
+    (void)data;
+    if (type == LOK_CB_INVALIDATE_TILES) {
+        g_dirty++;
+    } else if (type == LOK_CB_INVALIDATE_VISIBLE_CURSOR && payload) {
+        if (sscanf(payload, "%ld, %ld, %ld, %ld", &g_cursor_x, &g_cursor_y, &g_cursor_w, &g_cursor_h) == 4) {
+            g_cursor_valid = 1;
+        }
+    } else if (type == LOK_CB_TEXT_SELECTION) {
+        snprintf(g_selection, sizeof g_selection, "%s", payload ? payload : "");
+    }
+}
+
 // フォルダのパスを file:/// の URL にする（空白は %20）
 static void to_file_url(const char *path, char *out, size_t n) {
     char tmp[MAX_PATH * 4];
@@ -153,12 +177,46 @@ static void handle_request(SOCKET s, const char *method, const char *target) {
         free(bmp);
         return;
     }
+    if (strcmp(path, "/cursor") == 0) {
+        char json[4608];
+        snprintf(json, sizeof json,
+            "{\"valid\":%d,\"x\":%ld,\"y\":%ld,\"w\":%ld,\"h\":%ld,\"dirty\":%lu,\"sel\":\"%s\"}",
+            g_cursor_valid, g_cursor_x, g_cursor_y, g_cursor_w, g_cursor_h, g_dirty, g_selection);
+        send_response(s, "200 OK", "application/json", json, strlen(json));
+        return;
+    }
+    if (strcmp(path, "/mouse") == 0 && strcmp(method, "POST") == 0) {
+        // type: 0 = 押す、1 = 離す、2 = 動かす。x・y は twips（文書の位置）
+        get_param(query, "type", p1, sizeof p1);
+        get_param(query, "x", p2, sizeof p2);
+        get_param(query, "y", p3, sizeof p3);
+        g_doc->pClass->postMouseEvent(g_doc, atoi(p1), atoi(p2), atoi(p3), 1, 1, 0);
+        send_text(s, "200 OK", "ok");
+        return;
+    }
+    if (strcmp(path, "/uno") == 0 && strcmp(method, "POST") == 0) {
+        // LibreOffice の命令（.uno:Bold など）。送れるのは、ここに並べたものだけ
+        static const char *allowed[] = { ".uno:Bold", ".uno:Italic", ".uno:Underline", ".uno:Strikeout", ".uno:Undo", ".uno:Redo", NULL };
+        get_param(query, "cmd", p1, sizeof p1);
+        for (int i = 0; allowed[i]; i++) {
+            if (strcmp(p1, allowed[i]) == 0) {
+                g_doc->pClass->postUnoCommand(g_doc, p1, NULL, false);
+                send_text(s, "200 OK", "ok");
+                return;
+            }
+        }
+        send_text(s, "400 Bad Request", "command not allowed");
+        return;
+    }
     if (strcmp(path, "/key") == 0 && strcmp(method, "POST") == 0) {
+        // cp: 文字のコードポイント（16 進）。kc: 特殊キーの番号（css::awt::Key。Enter は 1280 など。0 なら使わない）
         get_param(query, "type", p1, sizeof p1);
         get_param(query, "cp", p2, sizeof p2);
+        get_param(query, "kc", p3, sizeof p3);
         int type = atoi(p1);
         int cp = (int)strtoul(p2, NULL, 16);
-        g_doc->pClass->postKeyEvent(g_doc, type, cp, 0);
+        int kc = atoi(p3);
+        g_doc->pClass->postKeyEvent(g_doc, type, cp, kc);
         send_text(s, "200 OK", "ok");
         return;
     }
@@ -258,6 +316,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     g_doc->pClass->initializeForRendering(g_doc, NULL);
+    g_doc->pClass->registerCallback(g_doc, on_lok_callback, NULL);
     printf("loaded %s\n", doc_abs);
 
     WSADATA wsa;

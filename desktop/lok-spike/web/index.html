@@ -10,15 +10,28 @@
   :root[data-theme="dark"] { --bg: #1e1e1e; --ink: #eee; --muted: #aaa; }
   html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Yu Gothic UI", "Meiryo", sans-serif; }
   header { padding: 8px 16px; font-size: 13px; color: var(--muted); }
-  #viewport { height: calc(100vh - 80px); overflow-y: auto; display: flex; justify-content: center; }
-  #page { display: block; width: 794px; height: 1123px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); cursor: text; }
+  #viewport { height: calc(100vh - 120px); overflow-y: auto; display: flex; justify-content: center; }
+  header button { font-size: 12px; margin-right: 4px; padding: 2px 8px; }
+  header span { margin-left: 8px; }
+  #paper { position: relative; width: 794px; height: 1123px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  #page { display: block; width: 100%; height: 100%; cursor: text; }
+  #caret { position: absolute; display: none; width: 2px; background: #000; pointer-events: none; animation: blink 1s steps(1) infinite; }
+  .sel { position: absolute; background: rgba(51, 144, 255, .35); pointer-events: none; }
+  @keyframes blink { 50% { opacity: 0; } }
   #ime { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
   #log { font-family: Consolas, monospace; font-size: 12px; white-space: pre; padding: 4px 16px; color: var(--muted); height: 60px; overflow: hidden; }
 </style>
 </head>
 <body>
-<header>クリックして入力。日本語は IME で入力できる。ホイールで送る</header>
-<div id="viewport"><img id="page" alt="文書" draggable="false"></div>
+<header>
+  <button type="button" data-uno=".uno:Undo" title="Ctrl+Z">元に戻す</button>
+  <button type="button" data-uno=".uno:Redo" title="Ctrl+Y">やり直す</button>
+  <button type="button" data-uno=".uno:Bold" title="Ctrl+B"><b>B</b></button>
+  <button type="button" data-uno=".uno:Italic" title="Ctrl+I"><i>I</i></button>
+  <button type="button" data-uno=".uno:Underline" title="Ctrl+U"><u>U</u></button>
+  <span>クリックして入力。Shift+矢印で選択</span>
+</header>
+<div id="viewport"><div id="paper"><img id="page" alt="文書" draggable="false"><div id="caret"></div></div></div>
 <textarea id="ime" aria-label="入力"></textarea>
 <div id="log"></div>
 <script>
@@ -48,9 +61,13 @@
   }
 
   // 入力のあとは描画が遅れて終わるので、少し待ってから描き直す
+  // LibreOffice の反映は、描いた直後だと間に合わないことがあるので、少し間をおいて 2 回描き直す
   function scheduleRender(delay = 300) {
     clearTimeout(timer);
-    timer = setTimeout(render, delay);
+    timer = setTimeout(() => {
+      render();
+      setTimeout(render, 600);
+    }, delay);
   }
 
   async function render() {
@@ -65,17 +82,82 @@
     if (old) URL.revokeObjectURL(old);
     page.dataset.url = page.src;
     log(`描画 ${(performance.now() - t0).toFixed(0)} ms（y=${yPx}px）`);
+    updateCaret();
   }
+
+  // 選択の範囲（LibreOffice の TEXT_SELECTION。「x, y, w, h; …」・twips）を、表示の上に青く重ねる
+  function drawSelection(sel) {
+    document.querySelectorAll('.sel').forEach((n) => n.remove());
+    if (!sel) return;
+    const paper = document.getElementById('paper');
+    sel.split(';').forEach((r) => {
+      const v = r.split(',').map((s) => parseInt(s, 10));
+      if (v.length !== 4 || v.some(isNaN)) return;
+      const d = document.createElement('div');
+      d.className = 'sel';
+      d.style.left = (v[0] / 15) + 'px';
+      d.style.top = (v[1] / 15 - yPx) + 'px';
+      d.style.width = (v[2] / 15) + 'px';
+      d.style.height = (v[3] / 15) + 'px';
+      paper.appendChild(d);
+    });
+  }
+
+  // カーソルの位置を LibreOffice から取って、表示の上に置く（twips → px は 15 で割る）
+  const caret = document.getElementById('caret');
+  async function updateCaret() {
+    const c = await (await fetch('/cursor')).json();
+    drawSelection(c.sel);
+    if (!c.valid) { caret.style.display = 'none'; return; }
+    const top = c.y / 15 - yPx;
+    if (top < 0 || top >= H) { caret.style.display = 'none'; return; }
+    caret.style.display = 'block';
+    caret.style.left = (c.x / 15) + 'px';
+    caret.style.top = top + 'px';
+    caret.style.height = Math.max(12, c.h / 15) + 'px';
+  }
+
+  // 特殊キー → css::awt::Key の番号（LibreOffice の Key.idl。cp は改行・削除などの文字コード）
+  const SPECIAL = {
+    Enter: { kc: 1280, cp: 13 },
+    Backspace: { kc: 1283, cp: 8 },
+    Delete: { kc: 1286, cp: 0 },
+    ArrowLeft: { kc: 1026, cp: 0 },
+    ArrowRight: { kc: 1027, cp: 0 },
+    ArrowUp: { kc: 1025, cp: 0 },
+    ArrowDown: { kc: 1024, cp: 0 },
+    Home: { kc: 1028, cp: 0 },
+    End: { kc: 1029, cp: 0 },
+  };
+
+  // 書式・取り消しの命令（LibreOffice の .uno: 命令）を送って、描き直す
+  const UNO = { b: '.uno:Bold', i: '.uno:Italic', u: '.uno:Underline', z: '.uno:Undo', y: '.uno:Redo' };
+  async function uno(cmd) {
+    await post(`/uno?cmd=${cmd}`);
+    scheduleRender();
+  }
+  document.querySelectorAll('[data-uno]').forEach((b) => {
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても文字の入力先を失わない
+    b.addEventListener('click', () => uno(b.dataset.uno));
+  });
 
   // キー入力（IME の変換中は除く）
   ime.addEventListener('keydown', async (e) => {
     if (e.isComposing || e.keyCode === 229) return;
+    if (e.ctrlKey && !e.altKey && !e.metaKey && UNO[e.key.toLowerCase()]) {
+      e.preventDefault();
+      return uno(UNO[e.key.toLowerCase()]);
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
-    if (e.key.length !== 1) return; // 特殊キーは次の段階で扱う
+    const sp = SPECIAL[e.key];
+    if (!sp && e.key.length !== 1) return;
     e.preventDefault();
-    const cp = e.key.codePointAt(0).toString(16).toUpperCase();
-    const ms = await post(`/key?type=0&cp=${cp}`);
-    await post(`/key?type=1&cp=${cp}`);
+    const cp = sp ? sp.cp.toString(16).toUpperCase() : e.key.codePointAt(0).toString(16).toUpperCase();
+    // Shift+矢印・Home・End は選択になる（LibreOffice では KEY_SHIFT = 4096 を足す）
+    const shift = e.shiftKey && /^(Arrow|Home|End)/.test(e.key) ? 4096 : 0;
+    const kc = sp ? sp.kc + shift : 0;
+    const ms = await post(`/key?type=0&cp=${cp}&kc=${kc}`);
+    await post(`/key?type=1&cp=${cp}&kc=${kc}`);
     log(`キー ${e.key}（送信 ${ms.toFixed(1)} ms）`);
     scheduleRender();
   });
@@ -111,9 +193,36 @@
     scheduleRender();
   });
 
-  page.addEventListener('mousedown', (e) => {
+  // マウスの位置（twips）。表示の位置（yPx）を足して、文書の位置にする
+  function toTwips(e) {
+    const rect = page.getBoundingClientRect();
+    return { x: Math.round((e.clientX - rect.left) * 15), y: Math.round((e.clientY - rect.top + yPx) * 15) };
+  }
+
+  // ドラッグで選択する。押した所で「押す」、動かすと「動かす」、離すと「離す」を LibreOffice に送る
+  let dragging = false;
+  let moveBusy = false;
+  page.addEventListener('mousedown', async (e) => {
     e.preventDefault();
     ime.focus({ preventScroll: true });
+    dragging = true;
+    const p = toTwips(e);
+    await post(`/mouse?type=0&x=${p.x}&y=${p.y}`);
+  });
+  window.addEventListener('mousemove', async (e) => {
+    if (!dragging || moveBusy) return; // 送りすぎないよう、前の分が終わってから次を送る
+    moveBusy = true;
+    const p = toTwips(e);
+    await post(`/mouse?type=2&x=${p.x}&y=${p.y}`);
+    moveBusy = false;
+  });
+  window.addEventListener('mouseup', async (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const p = toTwips(e);
+    await post(`/mouse?type=1&x=${p.x}&y=${p.y}`);
+    log(`選択・カーソル（twips ${p.x}, ${p.y}）`);
+    scheduleRender(200);
   });
 
   // 文書の高さ（px）。表示の位置がこれを超えないようにする（超えると黒い画面になる）
