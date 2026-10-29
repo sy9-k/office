@@ -1729,15 +1729,46 @@
       return out;
     }
     var lokMsg = null; // パネルの保存を受け取る処理（パネルを閉じるときに外す）
-    // LibreOffice で表示（デスクトップ版・試作）: 今の文書を docx にして、LOKit のサーバーに開かせ、その画面を重ねて見せる
+    // LibreOffice の保存（試作）: 保存した docx を、ファイルの中に入れておく（書式をそのまま残すため）。
+    //   lokSig は、そのときの HTML の印。HTML がそのあとで変わっていなければ、docx をそのまま使う
+    function htmlSig(html) {
+      var s = String(html || ""), h = 0;
+      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+      return s.length + ":" + h;
+    }
+    function bytesToB64(u8) {
+      var s = "";
+      for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      return btoa(s);
+    }
+    function b64ToBytes(b64) {
+      var s = atob(b64), u8 = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+      return u8;
+    }
+    // LibreOffice で表示（デスクトップ版・試作）: 今の文書を、LOKit のサーバーに開かせ、その画面を重ねて見せる
     function lokView() {
-      sync();
-      return docxFiles().then(Zip.write).then(function (b) {
-        return b.arrayBuffer();
-      }).then(function (ab) {
-        return window.OfficePlatform.lokPreview(Array.prototype.slice.call(new Uint8Array(ab)));
+      var keep = data && data.lokDocx && data.lokSig === htmlSig(data.html);
+      var src = keep ? Promise.resolve(b64ToBytes(data.lokDocx)) : (sync(), docxFiles().then(Zip.write).then(function (b) { return b.arrayBuffer(); }).then(function (ab) { return new Uint8Array(ab); }));
+      return src.then(function (u8) {
+        return window.OfficePlatform.lokPreview(Array.prototype.slice.call(u8));
       }).then(showLokPanel).catch(function (e) {
         O.notify(t("LibreOffice で表示できませんでした") + "：" + (e && e.message ? e.message : e));
+      });
+    }
+    // 上書き保存: LibreOffice が書き出した docx で、今の Doc の中身を置きかえる（同じファイルに保存される）
+    function applyLokDocx(u8) {
+      return readDocx(new File([u8], "LibreOffice.docx")).then(function (d) {
+        data.html = d.html;
+        if (d.page) data.page = d.page;
+        if (d.styles) data.styles = d.styles;
+        data.lokDocx = bytesToB64(u8);
+        data.lokSig = htmlSig(data.html);
+        render({ restore: false });
+        O.changed(true);
+        O.notify(t("保存しました"));
+      }).catch(function (e) {
+        O.notify(t("保存できませんでした") + "：" + (e && e.message ? e.message : e));
       });
     }
     function showLokPanel(url) {
@@ -1758,6 +1789,7 @@
       // パネルの「保存」: LibreOffice が書き出した docx を受けて、新しい Doc として開く（今の Doc は置きかえない）
       lokMsg = function (e) {
         if (e.source !== frame.contentWindow || !e.data || e.data.type !== "lok-saved") return;
+        if (e.data.mode === "overwrite") return applyLokDocx(new Uint8Array(e.data.bytes));
         var f = new File([e.data.bytes], t("LibreOffice で保存") + ".docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
         if (window.OfficeOpenForeign) window.OfficeOpenForeign(f);
       };

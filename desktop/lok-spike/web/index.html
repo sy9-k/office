@@ -24,12 +24,13 @@
 </head>
 <body>
 <header>
-  <button type="button" id="save-btn" title="この内容を、新しい Doc として開く">保存（新しい Doc）</button>
-  <button type="button" data-uno=".uno:Undo" title="Ctrl+Z">元に戻す</button>
-  <button type="button" data-uno=".uno:Redo" title="Ctrl+Y">やり直す</button>
-  <button type="button" data-uno=".uno:Bold" title="Ctrl+B"><b>B</b></button>
-  <button type="button" data-uno=".uno:Italic" title="Ctrl+I"><i>I</i></button>
-  <button type="button" data-uno=".uno:Underline" title="Ctrl+U"><u>U</u></button>
+  <button type="button" id="save-btn" title="この Doc に上書きで保存する">保存</button>
+  <button type="button" id="save-new-btn" title="この内容を、新しい Doc として開く">新しい Doc として保存</button>
+  <button type="button" data-ctrl="z" title="Ctrl+Z">元に戻す</button>
+  <button type="button" data-ctrl="y" title="Ctrl+Y">やり直す</button>
+  <button type="button" data-ctrl="b" title="Ctrl+B"><b>B</b></button>
+  <button type="button" data-ctrl="i" title="Ctrl+I"><i>I</i></button>
+  <button type="button" data-ctrl="u" title="Ctrl+U"><u>U</u></button>
   <span>クリックして入力。Shift+矢印で選択</span>
 </header>
 <div id="viewport"><div id="paper"><img id="page" alt="文書" draggable="false"><div id="caret"></div></div></div>
@@ -131,36 +132,40 @@
     End: { kc: 1029, cp: 0 },
   };
 
-  // 書式・取り消しの命令（LibreOffice の .uno: 命令）を送って、描き直す
-  const UNO = { b: '.uno:Bold', i: '.uno:Italic', u: '.uno:Underline', z: '.uno:Undo', y: '.uno:Redo' };
-  async function uno(cmd) {
-    await post(`/uno?cmd=${cmd}`);
+  // 書式・取り消し: Ctrl+文字 のキーを LibreOffice に送る（.uno: の命令を直接送る方法は効かなかった）
+  //   キーの番号 = Ctrl（0x2000 = 8192）+ 文字の番号（css::awt::Key。A = 512 から順。B = 513）
+  const CTRL = { b: 8705, i: 8712, u: 8724, z: 8729, y: 8728 };
+  async function ctrlKey(k) {
+    await post(`/key?type=0&cp=0&kc=${CTRL[k]}`);
+    await post(`/key?type=1&cp=0&kc=${CTRL[k]}`);
     scheduleRender();
   }
   // 保存: 書き出した docx を取って、このパネルを開いたアプリの画面（親）に渡す。親が新しい Doc として開く
-  document.getElementById('save-btn').addEventListener('click', async () => {
+  async function saveAs(mode) {
     try {
       const r = await fetch('/save', { method: 'POST' });
       if (!r.ok) throw new Error('save ' + r.status);
       const bytes = await (await fetch('/saved.docx')).arrayBuffer();
-      window.parent.postMessage({ type: 'lok-saved', bytes }, '*', [bytes]);
-      log('保存しました（新しい Doc として開きます）');
+      window.parent.postMessage({ type: 'lok-saved', mode, bytes }, '*', [bytes]);
+      log(mode === 'overwrite' ? '保存しました（この Doc に上書き）' : '保存しました（新しい Doc として開きます）');
     } catch (e) {
       log('保存できませんでした: ' + e.message);
     }
-  });
+  }
+  document.getElementById('save-btn').addEventListener('click', () => saveAs('overwrite'));
+  document.getElementById('save-new-btn').addEventListener('click', () => saveAs('new'));
 
-  document.querySelectorAll('[data-uno]').forEach((b) => {
+  document.querySelectorAll('[data-ctrl]').forEach((b) => {
     b.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても文字の入力先を失わない
-    b.addEventListener('click', () => uno(b.dataset.uno));
+    b.addEventListener('click', () => ctrlKey(b.dataset.ctrl));
   });
 
   // キー入力（IME の変換中は除く）
   ime.addEventListener('keydown', async (e) => {
     if (e.isComposing || e.keyCode === 229) return;
-    if (e.ctrlKey && !e.altKey && !e.metaKey && UNO[e.key.toLowerCase()]) {
+    if (e.ctrlKey && !e.altKey && !e.metaKey && CTRL[e.key.toLowerCase()]) {
       e.preventDefault();
-      return uno(UNO[e.key.toLowerCase()]);
+      return ctrlKey(e.key.toLowerCase());
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const sp = SPECIAL[e.key];

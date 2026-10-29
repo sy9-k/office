@@ -46,3 +46,9 @@ lok_spike.exe sample.docx out.bmp "C:\Program Files\LibreOffice\program" "D:\Git
 - 起動: `lok_server.exe sample.docx "C:\Program Files\LibreOffice\program" "...\profile" "...\web" 8765`
 - 結果（ブラウザのペインで確認）: 英字「Hi」の入力が反映された。IME は DOM のイベントを同じ順番で発生させて確認した（変換中「か」「かん」「かんじ」→ 確定「漢字」）。確定後の描画も正しい
 - 未確認: 実機の Windows IME（TSF）の動き、変換候補ウィンドウの位置（カーソル位置を LOKit から取って WebView に伝える必要がある）、Tauri の殻（WebView2）への組み込み。今回のペインは Chromium 系だが、Tauri の WebView2 とは別物
+
+## 書式（太字・斜体）と読み取り専用の原因（2026-10-29 調査）
+- **読み取り専用になる原因**: `.~lock.<名前>#` のロックファイルが残っていると、LibreOffice はその文書を読み取り専用（`EditDoc=false`）で開き、文字入力が効かない。テストのたびにサーバーを強制終了していたため、ロックが残った。起動の前に、開くファイルの古いロックを消すように直した。
+- **書式の命令（`postUnoCommand`）は効かない**: `.uno:Bold` などを送っても、通知も文書の変化も起きない。全選択（`.uno:SelectAll`）でも通知が出ないことから、命令そのものが実行されていない。
+- **Ctrl+キーなら効く**: キーの番号は「Ctrl（0x2000 = 8192）＋ 文字の番号」（`css::awt::Key`。A = 512 から順。B = 513、I = 520、U = 532、Y = 536、Z = 537）。Ctrl+B = 8705、Ctrl+I = 8712、Ctrl+U = 8724、Ctrl+Y = 8728、Ctrl+Z = 8729。パネルの B・I・U・元に戻す・やり直すのボタンは、このキーを送る形に変えた。
+- 確かめた結果: 見出しの「abc」を選んで B を押して保存すると、`<w:b w:val="false"/>`（見出しは太字のスタイルなので、太字が外れる）。I を押すと `<w:i/>` が入る。

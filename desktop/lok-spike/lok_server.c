@@ -39,6 +39,25 @@ static long g_cursor_x, g_cursor_y, g_cursor_w, g_cursor_h;
 static unsigned long g_dirty;
 static char g_selection[4096]; // 選択の範囲（そのまま JSON に入れる。数字・「,」「;」「空白」だけ）
 
+// LOKit の処理ループ（命令の実行や、画面の更新を回す）。専用のスレッドで回す。
+// 回しておかないと、postUnoCommand などの命令が実行されない
+static int lok_poll(void *data, int timeoutUs) {
+    (void)data;
+    int ms = timeoutUs / 1000;
+    Sleep(ms < 1 ? 1 : (ms > 5 ? 5 : ms));
+    return 0;
+}
+
+static void lok_wake(void *data) {
+    (void)data;
+}
+
+static DWORD WINAPI lok_loop_thread(LPVOID arg) {
+    (void)arg;
+    g_kit->pClass->runLoop(g_kit, lok_poll, lok_wake, NULL);
+    return 0;
+}
+
 static void on_lok_callback(int type, const char *payload, void *data) {
     (void)data;
     if (type == LOK_CB_INVALIDATE_TILES) {
@@ -197,20 +216,6 @@ static void handle_request(SOCKET s, const char *method, const char *target) {
         send_text(s, "200 OK", "ok");
         return;
     }
-    if (strcmp(path, "/uno") == 0 && strcmp(method, "POST") == 0) {
-        // LibreOffice の命令（.uno:Bold など）。送れるのは、ここに並べたものだけ
-        static const char *allowed[] = { ".uno:Bold", ".uno:Italic", ".uno:Underline", ".uno:Strikeout", ".uno:Undo", ".uno:Redo", NULL };
-        get_param(query, "cmd", p1, sizeof p1);
-        for (int i = 0; allowed[i]; i++) {
-            if (strcmp(p1, allowed[i]) == 0) {
-                g_doc->pClass->postUnoCommand(g_doc, p1, NULL, false);
-                send_text(s, "200 OK", "ok");
-                return;
-            }
-        }
-        send_text(s, "400 Bad Request", "command not allowed");
-        return;
-    }
     if (strcmp(path, "/save") == 0 && strcmp(method, "POST") == 0) {
         // 今の内容を docx に書き出す（LibreOffice の書き出しを使う）。保存先は文書の隣の「.saved.docx」
         char url[MAX_PATH * 4];
@@ -338,6 +343,19 @@ int main(int argc, char **argv) {
     snprintf(g_doc_abs, sizeof g_doc_abs, "%s", doc_abs);
     to_file_url(doc_abs, doc_url, sizeof doc_url);
 
+    // 前の起動で残ったロックファイル（.~lock.名前#）があると、LibreOffice はその文書を読み取り専用で開く。
+    // このファイルは、このサーバーが作った一時ファイルなので、起動の前に消す
+    {
+        char dir[MAX_PATH * 2], base[MAX_PATH], lock[MAX_PATH * 2 + 64];
+        snprintf(dir, sizeof dir, "%s", doc_abs);
+        char *slash = strrchr(dir, '\\');
+        if (slash) {
+            snprintf(base, sizeof base, "%s", slash + 1);
+            *slash = 0;
+            snprintf(lock, sizeof lock, "%s\\.~lock.%s#", dir, base);
+            DeleteFileA(lock);
+        }
+    }
     g_kit = hook(prog, profile_url);
     if (!g_kit) { fprintf(stderr, "LOKit init failed\n"); return 1; }
     g_doc = g_kit->pClass->documentLoad(g_kit, doc_url);
@@ -348,6 +366,7 @@ int main(int argc, char **argv) {
     }
     g_doc->pClass->initializeForRendering(g_doc, NULL);
     g_doc->pClass->registerCallback(g_doc, on_lok_callback, NULL);
+    CreateThread(NULL, 0, lok_loop_thread, NULL, 0, NULL);
     printf("loaded %s\n", doc_abs);
 
     WSADATA wsa;
