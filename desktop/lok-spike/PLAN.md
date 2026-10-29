@@ -75,3 +75,10 @@
 
 ## 次の一手
 フェーズ 1 の最初の作業: `web/index.html` の描画・入力の処理を `shared/doc-lok.js` に移し、Doc の画面の中に表示できるようにする。
+
+## 方針の変更（2026-10-29）: 二つに分ける
+- **完全 Web ベースのデスクトップ版**: 今の Web 版のコード（`contenteditable` の Doc、HTML の編集）をそのまま使う。LibreOffice は使わない
+- **完全 LibreOffice ベースのデスクトップ版**: 文書の処理は LibreOffice（LOKit）。画面（リボン、ファイルの画面、ハブ）は HTML で作る。Doc の本文は、フェーズ 1 の `shared/doc-lok.js` を使う
+- 今の作業（フェーズ 1）は、LibreOffice 版だけに入るようにする。Web 版では、今の HTML の編集を変えない
+- 分け方（ブランチ・ビルドの設定・アプリの名前）は、まだ決めていない
+- 「完全 LibreOffice」の画面を LibreOffice 自身の UI（VCL）にする案は、規模が大きいので、今は採らない（必要が出たら、フォークの一部改造を検討）
