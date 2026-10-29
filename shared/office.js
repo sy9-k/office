@@ -1312,10 +1312,11 @@
     clearTimeout(saveTimer); saveTimer = null;
     if (!current) return Promise.resolve(false);
     var f = current;
-    if (App && App.beforeSave) App.beforeSave();
+    // 保存の前に、アプリの中身を取り出す（LibreOffice の文書のように、少し時間がかかるものもある）
+    var pre = App && App.beforeSave ? App.beforeSave() : null;
     dirty = false;
     setStatus(t("保存しています…"));
-    return Store.save(f).then(function () {
+    return Promise.resolve(pre).then(function () { return Store.save(f); }).then(function () {
       if (current === f && !dirty) setStatus(f.queued ? t("オフライン・つながったら Google ドライブに送ります") : t("保存済み"));
       // 10 分ごとに、版の履歴に残す
       if (Date.now() - lastVersion > 600000) { lastVersion = Date.now(); Store.addVersion(f.id, f.data); }

@@ -182,6 +182,8 @@
 
     // ---------- いまの状態 ----------
     var data = null, page = null, saved = null, readOnly = false, imgSel = null, painter = null;
+    // デスクトップ版は本文を LibreOffice（shared/doc-lok.js）にする
+    var LOK = !!(window.OfficePlatform && OfficePlatform.features.lokPreview && window.OfficeDocLok), lokDoc = null;
     var showNav = false, showCmts = false, zoomZ = 1;
     function el(id) { return $(id); }
     function sync() { if (!page) return; data.html = page.innerHTML; }
@@ -221,6 +223,7 @@
 
     // ---------- 画面を作る ----------
     function render(opts) {
+      if (LOK) return renderLok();
       data = O.data();
       upgrade(data);
       var caret = opts && opts.restore ? caretOffset() : null, sy = el("doc-scroll") ? el("doc-scroll").scrollTop : 0;
@@ -1082,8 +1085,8 @@
     // ---------- リボンのボタン ----------
     var SYMBOLS = ["※", "・", "〒", "〇", "◎", "△", "□", "■", "◆", "★", "☆", "→", "←", "↑", "↓", "①", "②", "③", "④", "⑤", "℃", "￥", "§", "¶", "©", "®", "™", "±", "×", "÷", "≠", "≦", "≧", "∞", "♪", "々", "〃", "〆"];
     function command(cmd, at) {
+      if (LOK) return lokCommand(cmd);
       if (!page) return;
-      if (cmd === "lokView") return lokView();
       var ro = readOnly && !/^(nav|comments|count|toc:update)$/.test(cmd);
       if (ro) { O.notify(t("閲覧モードでは書きかえられません")); return; }
       if (cmd === "designMenu") {
@@ -1728,14 +1731,6 @@
       });
       return out;
     }
-    var lokMsg = null; // パネルの保存を受け取る処理（パネルを閉じるときに外す）
-    // LibreOffice の保存（試作）: 保存した docx を、ファイルの中に入れておく（書式をそのまま残すため）。
-    //   lokSig は、そのときの HTML の印。HTML がそのあとで変わっていなければ、docx をそのまま使う
-    function htmlSig(html) {
-      var s = String(html || ""), h = 0;
-      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-      return s.length + ":" + h;
-    }
     function bytesToB64(u8) {
       var s = "";
       for (var i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
@@ -1746,62 +1741,37 @@
       for (var i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
       return u8;
     }
-    // LibreOffice で表示（デスクトップ版・試作）: 今の文書を、LOKit のサーバーに開かせ、その画面を重ねて見せる
-    function lokView() {
-      var keep = data && data.lokDocx && data.lokSig === htmlSig(data.html);
-      var src = keep ? Promise.resolve(b64ToBytes(data.lokDocx)) : (sync(), docxFiles().then(Zip.write).then(function (b) { return b.arrayBuffer(); }).then(function (ab) { return new Uint8Array(ab); }));
-      return src.then(function (u8) {
-        return window.OfficePlatform.lokPreview(Array.prototype.slice.call(u8));
-      }).then(showLokPanel).catch(function (e) {
-        O.notify(t("LibreOffice で表示できませんでした") + "：" + (e && e.message ? e.message : e));
-      });
+    // ---------- デスクトップ版: 本文は LibreOffice（shared/doc-lok.js） ----------
+    // 保存の前に、LibreOffice の内容を docx にして、ファイルの中に入れる（lokDocx）
+    function lokSave() {
+      if (!lokDoc) return Promise.resolve();
+      return lokDoc.save().then(function (u8) { data.lokDocx = bytesToB64(u8); });
     }
-    // 上書き保存: LibreOffice が書き出した docx で、今の Doc の中身を置きかえる（同じファイルに保存される）
-    function applyLokDocx(u8) {
-      return readDocx(new File([u8], "LibreOffice.docx")).then(function (d) {
-        data.html = d.html;
-        if (d.page) data.page = d.page;
-        if (d.styles) data.styles = d.styles;
-        data.lokDocx = bytesToB64(u8);
-        data.lokSig = htmlSig(data.html);
-        render({ restore: false });
-        O.changed(true);
-        O.notify(t("保存しました"));
+    // 太字・斜体・下線は、Ctrl＋文字のキーで送る。ほかの命令は、まだ LibreOffice の画面では使えない
+    function lokCommand(cmd) {
+      var keys = { bold: "b", italic: "i", underline: "u" };
+      if (keys[cmd]) { if (lokDoc) lokDoc.ctrl(keys[cmd]); return; }
+      O.notify(t("この操作は、まだ LibreOffice の画面では使えません"));
+    }
+    function lokClose() { if (lokDoc) { lokDoc.dispose(); lokDoc = null; } }
+    // 本文の画面を、LibreOffice の部品で作る。docx があればそれを開き、無ければ今の内容から docx を作る
+    function renderLok() {
+      data = O.data();
+      upgrade(data);
+      lokClose();
+      page = null; imgSel = null; painter = null;
+      $("canvas").innerHTML = '<div id="doc-lok-host" style="height:100%;min-height:0"></div>';
+      var bytes = data.lokDocx ? Promise.resolve(b64ToBytes(data.lokDocx)) :
+        docxFiles().then(Zip.write).then(function (b) { return b.arrayBuffer(); }).then(function (ab) { return new Uint8Array(ab); });
+      return bytes.then(function (u8) {
+        if (!$("doc-lok-host")) return; // もう別の画面になっていたら、何もしない
+        lokDoc = window.OfficeDocLok($("doc-lok-host"), u8, { onChange: function () { O.changed(true); } });
+        return lokDoc.ready;
       }).catch(function (e) {
-        O.notify(t("保存できませんでした") + "：" + (e && e.message ? e.message : e));
+        O.notify(t("LibreOffice の画面を開けませんでした") + "：" + (e && e.message ? e.message : e));
       });
     }
-    function showLokPanel(url) {
-      // 古い画面だけ消す（サーバーは、いま起動したものなので止めない）
-      var old = document.getElementById("lok-panel");
-      if (old) old.remove();
-      var box = document.createElement("div");
-      box.id = "lok-panel";
-      box.style.cssText = "position:fixed;inset:0;z-index:9000;background:#f2f2f2;display:flex;flex-direction:column";
-      // 閉じるボタンは左に置く（右上はウィンドウの「×」と重なって、押すとアプリごと閉じるため）
-      box.innerHTML = '<div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:#fff;border-bottom:1px solid #ddd;font-size:13px"><button type="button" id="lok-close">' + esc(t("閉じる")) + '</button><b>' + esc(t("LibreOffice で表示（試作）")) + '</b><span style="color:#666">' + esc(t("描画と入力は LibreOffice の処理")) + "</span></div>";
-      var frame = document.createElement("iframe");
-      frame.src = url;
-      frame.style.cssText = "flex:1;border:0;width:100%";
-      box.appendChild(frame);
-      document.body.appendChild(box);
-      document.getElementById("lok-close").addEventListener("click", closeLokPanel);
-      // パネルの「保存」: LibreOffice が書き出した docx を受けて、新しい Doc として開く（今の Doc は置きかえない）
-      lokMsg = function (e) {
-        if (e.source !== frame.contentWindow || !e.data || e.data.type !== "lok-saved") return;
-        if (e.data.mode === "overwrite") return applyLokDocx(new Uint8Array(e.data.bytes));
-        var f = new File([e.data.bytes], t("LibreOffice で保存") + ".docx", { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-        if (window.OfficeOpenForeign) window.OfficeOpenForeign(f);
-      };
-      window.addEventListener("message", lokMsg);
-    }
-    function closeLokPanel() {
-      var box = document.getElementById("lok-panel");
-      if (box) box.remove();
-      if (lokMsg) window.removeEventListener("message", lokMsg);
-      lokMsg = null;
-      if (window.OfficePlatform && OfficePlatform.features.lokPreview) OfficePlatform.lokStop().catch(function () {});
-    }
+
     function exportAs(id) {
       sync();
       if (id === "docx") {
@@ -2309,13 +2279,6 @@
       return '<div class="th th--doc" aria-hidden="true"><div class="th-doc">' + sanitize(html) + "</div></div>";
     }
 
-    // デスクトップ版だけ: 「表示」タブに LibreOffice で表示（試作）を足す
-    if (window.OfficePlatform && OfficePlatform.features.lokPreview) {
-      ribbon.forEach(function (tb) {
-        if (tb.tab === t("表示")) tb.groups.push({ label: "LibreOffice", items: [{ big: 1, icon: "visibility", label: t("LibreOffice で表示"), cmd: "lokView" }] });
-      });
-    }
-
     return {
       ribbon: ribbon,
       ribbonSig: function () { return cstList(data).length + ":" + cstCurrent(); },
@@ -2330,8 +2293,8 @@
       defaultZoom: function () { var sc = $("canvas"), d = dims(pageOf(O.data() || {})); return sc && sc.clientWidth && sc.clientWidth < d.w + 48 ? Math.max(0.4, Math.floor((sc.clientWidth - 24) / d.w * 20) / 20) : 1; },
       focus: function () { back(); },
       open: function () { showNav = false; showCmts = false; },
-      close: function () { page = null; imgSel = null; },
-      beforeSave: sync,
+      close: function () { lokClose(); page = null; imgSel = null; },
+      beforeSave: function () { return LOK ? lokSave() : sync(); },
       beforeUndo: function () { sync(); },
       setRead: function (on) { readOnly = on; if (page) page.contentEditable = on ? "false" : "true"; ["doc-head", "doc-foot"].forEach(function (id) { if (el(id)) el(id).readOnly = on; }); if (on) selectImg(null); stat(); },
       selectedText: function () { var s = getSelection(); return s.rangeCount && inPage(s.anchorNode) ? s.toString() : ""; },

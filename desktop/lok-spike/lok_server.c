@@ -132,7 +132,7 @@ static void send_all(SOCKET s, const void *data, size_t len) {
 static void send_response(SOCKET s, const char *status, const char *type, const void *body, size_t len) {
     char head[512];
     int hn = snprintf(head, sizeof head,
-        "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n",
+        "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nCache-Control: no-store\r\nAccess-Control-Allow-Origin: *\r\n\r\n",
         status, type, len);
     send_all(s, head, (size_t)hn);
     if (len) send_all(s, body, len);
