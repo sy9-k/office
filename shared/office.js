@@ -138,6 +138,8 @@
     function apply(before, after) {
       if (before === after) return false;
       try { if (after) localStorage.setItem("skhub_account", after); else localStorage.removeItem("skhub_account"); } catch (e) { /* 写せなくても、このページでは使える */ }
+      // ログイン・ログアウトしたら、招待も確かめ直す（shared/invite-gate.js）
+      if (window.OfficeGate) OfficeGate.recheck();
       fillAvatars();
       if ($("home") && !$("home").hidden && (view === "account" || view === "home")) renderStart();
       return true;
@@ -245,6 +247,8 @@
       var text = new TextDecoder().decode(bytes), o = JSON.parse(text);
       if (!o || typeof o !== "object") throw new Error("login");
       localStorage.setItem("skhub_account", text);
+      // 招待制（shared/invite-gate.js）: sk-hub.jp/account/ が、招待されているかも渡す（invited=office / invite=not-invited・not-google）
+      if (window.OfficeGate) OfficeGate.setDesktop(r.invited === "office", r.invite);
       fillAvatars();
       if ($("home") && !$("home").hidden) renderStart();
       notify(t("ログインしました"));
@@ -256,6 +260,7 @@
   // このアプリのログインの記録を外す（ブラウザ側のログインは、アカウントの管理のページで外せる）
   function desktopLogout() {
     try { localStorage.removeItem("skhub_account"); } catch (e) { /* なし */ }
+    if (window.OfficeGate) OfficeGate.reset();
     fillAvatars();
     if ($("home") && !$("home").hidden) renderStart();
     notify(t("このアプリのログインを外しました"));
@@ -266,6 +271,8 @@
   //   ほかのアプリが開いたままでも更新できる（前の版のファイルは名前を変えて残し、閉じて開き直すと新しい版になる）
   var desktopVersion = "", updating = false, UPDATE_KEY = "sk_office_update_check";
   if (DESKTOP) OfficePlatform.invoke("app_info").then(function (i) { desktopVersion = i.version; }, function () {});
+  // 招待制の画面（shared/invite-gate.js）の「ログイン」（デスクトップ版）
+  document.addEventListener("office-gate-login", function () { if (DESKTOP) desktopLogin(); });
   function checkUpdate(manual) {
     var U = window.__TAURI__ && window.__TAURI__.updater;
     if (!DESKTOP || !U || updating) return Promise.resolve();
