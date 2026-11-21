@@ -460,6 +460,17 @@ h1, h2, h3, p { margin: 0; }
 .hub-hero__text { display: grid; gap: 4px; min-width: 0; }
 .hub-hero__eyebrow { font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .2em; text-transform: uppercase; color: var(--md-on-surface-variant); }
 .hub-hero__lead { font-size: 16px; line-height: 24px; color: var(--md-on-surface-variant); }
+/* メインメニューの状態（アカウント・Google ドライブ・保存先・バージョン）。1 行に 4 つ、狭いときは 2 列 */
+.hub-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 20px 0 8px; }
+.hub-status__item { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 12px 14px; border: 0; border-radius: 16px; background: var(--md-surface-container-low); color: var(--md-on-surface); font: inherit; text-align: left; }
+button.hub-status__item { cursor: pointer; }
+.hub-status__item > .msr { color: var(--md-primary); flex: none; }
+.hub-status__item > span:not(.hub-status__acts) { display: grid; gap: 2px; min-width: 0; }
+.hub-status__item strong, .hub-status__item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-status__item strong { font-size: 14px; line-height: 20px; }
+.hub-status__item small { font-size: 12px; line-height: 16px; color: var(--md-on-surface-variant); }
+.hub-status__acts { margin-left: auto; display: flex; gap: 6px; flex: none; }
+@media (max-width: 900px) { .hub-status { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .apps--cards { gap: 16px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
 .app-card {
   --c: var(--md-primary); position: relative; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 20px; padding: 24px; border-radius: 28px; overflow: hidden;

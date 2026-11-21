@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOKit の WebView 試作</title>
+<style>
+  :root { --bg: #f2f2f2; --ink: #222; --muted: #666; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1e1e1e; --ink: #eee; --muted: #aaa; } }
+  :root[data-theme="dark"] { --bg: #1e1e1e; --ink: #eee; --muted: #aaa; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font-family: "Yu Gothic UI", "Meiryo", sans-serif; }
+  header { padding: 8px 16px; font-size: 13px; color: var(--muted); }
+  #viewport { height: calc(100vh - 120px); overflow-y: auto; display: flex; justify-content: center; }
+  header button { font-size: 12px; margin-right: 4px; padding: 2px 8px; }
+  header span { margin-left: 8px; }
+  #paper { position: relative; width: 794px; height: 1123px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  #page { display: block; width: 100%; height: 100%; cursor: text; }
+  #caret { position: absolute; display: none; width: 2px; background: #000; pointer-events: none; animation: blink 1s steps(1) infinite; }
+  .sel { position: absolute; background: rgba(51, 144, 255, .35); pointer-events: none; }
+  @keyframes blink { 50% { opacity: 0; } }
+  #ime { position: fixed; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; }
+  #log { font-family: Consolas, monospace; font-size: 12px; white-space: pre; padding: 4px 16px; color: var(--muted); height: 60px; overflow: hidden; }
+</style>
+</head>
+<body>
+<header>
+  <button type="button" id="save-btn" title="この Doc に上書きで保存する">保存</button>
+  <button type="button" id="save-new-btn" title="この内容を、新しい Doc として開く">新しい Doc として保存</button>
+  <button type="button" data-ctrl="z" title="Ctrl+Z">元に戻す</button>
+  <button type="button" data-ctrl="y" title="Ctrl+Y">やり直す</button>
+  <button type="button" data-ctrl="b" title="Ctrl+B"><b>B</b></button>
+  <button type="button" data-ctrl="i" title="Ctrl+I"><i>I</i></button>
+  <button type="button" data-ctrl="u" title="Ctrl+U"><u>U</u></button>
+  <span>クリックして入力。Shift+矢印で選択</span>
+</header>
+<div id="viewport"><div id="paper"><img id="page" alt="文書" draggable="false"><div id="caret"></div></div></div>
+<textarea id="ime" aria-label="入力"></textarea>
+<div id="log"></div>
+<script>
+  // LOKit のサーバー（同じ場所から配信している）
+  const W = 794, H = 1123;
+  const page = document.getElementById('page');
+  const ime = document.getElementById('ime');
+  const viewport = document.getElementById('viewport');
+  const logEl = document.getElementById('log');
+  let yPx = 0;          // 表示の一番上（px。twips は 15 倍）
+  let timer = null;
+  let renderSeq = 0;
+
+  function log(msg) {
+    logEl.textContent = (msg + '\n' + logEl.textContent).split('\n').slice(0, 4).join('\n');
+  }
+
+  // 文字列 → 16 進のコードポイント列（「,」区切り）
+  function hexList(s) {
+    return Array.from(s).map(c => c.codePointAt(0).toString(16).toUpperCase()).join(',');
+  }
+
+  async function post(path) {
+    const t0 = performance.now();
+    const res = await fetch(path, { method: 'POST' });
+    return performance.now() - t0;
+  }
+
+  // 入力のあとは描画が遅れて終わるので、少し待ってから描き直す
+  // LibreOffice の反映は、描いた直後だと間に合わないことがあるので、少し間をおいて 2 回描き直す
+  function scheduleRender(delay = 300) {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      render();
+      setTimeout(render, 600);
+    }, delay);
+  }
+
+  // LibreOffice は、ページの外側を真っ黒に描く。画面の端からつながる黒だけを、表示の地の色に変える
+  //   （ページの中の文字や線は、白いページに囲まれているので、つながらず変わらない）
+  async function cleanMargin(blob) {
+    const bmp = await createImageBitmap(blob);
+    const cv = document.createElement('canvas');
+    cv.width = bmp.width; cv.height = bmp.height;
+    const g = cv.getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    const w = cv.width, h = cv.height;
+    const id = g.getImageData(0, 0, w, h), d = id.data;
+    const seen = new Uint8Array(w * h);
+    const stack = [];
+    for (let x = 0; x < w; x++) { stack.push(x, (h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { stack.push(y * w, y * w + w - 1); }
+    while (stack.length) {
+      const p = stack.pop();
+      if (seen[p]) continue;
+      seen[p] = 1;
+      const i = p * 4;
+      if (d[i] !== 0 || d[i + 1] !== 0 || d[i + 2] !== 0) continue;
+      d[i] = d[i + 1] = d[i + 2] = 0xf2; // 表示の地の色
+      const x = p % w;
+      if (x > 0) stack.push(p - 1);
+      if (x < w - 1) stack.push(p + 1);
+      if (p >= w) stack.push(p - w);
+      if (p < (h - 1) * w) stack.push(p + w);
+    }
+    g.putImageData(id, 0, 0);
+    return new Promise((resolve) => cv.toBlob(resolve, 'image/png'));
+  }
+
+  async function render() {
+    const seq = ++renderSeq;
+    const t0 = performance.now();
+    const res = await fetch(`/tile?y=${yPx * 15}&w=${W}&h=${H}`);
+    if (!res.ok) { log('描画に失敗: ' + res.status); return; }
+    const blob = await cleanMargin(await res.blob());
+    if (seq !== renderSeq) return; // もっと新しい描画があるならこれは捨てる
+    const old = page.dataset.url;
+    page.src = URL.createObjectURL(blob);
+    if (old) URL.revokeObjectURL(old);
+    page.dataset.url = page.src;
+    log(`描画 ${(performance.now() - t0).toFixed(0)} ms（y=${yPx}px）`);
+    updateCaret();
+  }
+
+  // 選択の範囲（LibreOffice の TEXT_SELECTION。「x, y, w, h; …」・twips）を、表示の上に青く重ねる
+  function drawSelection(sel) {
+    document.querySelectorAll('.sel').forEach((n) => n.remove());
+    if (!sel) return;
+    const paper = document.getElementById('paper');
+    sel.split(';').forEach((r) => {
+      const v = r.split(',').map((s) => parseInt(s, 10));
+      if (v.length !== 4 || v.some(isNaN)) return;
+      const d = document.createElement('div');
+      d.className = 'sel';
+      d.style.left = (v[0] / 15) + 'px';
+      d.style.top = (v[1] / 15 - yPx) + 'px';
+      d.style.width = (v[2] / 15) + 'px';
+      d.style.height = (v[3] / 15) + 'px';
+      paper.appendChild(d);
+    });
+  }
+
+  // カーソルの位置を LibreOffice から取って、表示の上に置く（twips → px は 15 で割る）
+  const caret = document.getElementById('caret');
+  async function updateCaret() {
+    const c = await (await fetch('/cursor')).json();
+    drawSelection(c.sel);
+    if (!c.valid) { caret.style.display = 'none'; return; }
+    const top = c.y / 15 - yPx;
+    if (top < 0 || top >= H) { caret.style.display = 'none'; return; }
+    caret.style.display = 'block';
+    caret.style.left = (c.x / 15) + 'px';
+    caret.style.top = top + 'px';
+    caret.style.height = Math.max(12, c.h / 15) + 'px';
+  }
+
+  // 特殊キー → css::awt::Key の番号（LibreOffice の Key.idl。cp は改行・削除などの文字コード）
+  const SPECIAL = {
+    Enter: { kc: 1280, cp: 13 },
+    Backspace: { kc: 1283, cp: 8 },
+    Delete: { kc: 1286, cp: 0 },
+    ArrowLeft: { kc: 1026, cp: 0 },
+    ArrowRight: { kc: 1027, cp: 0 },
+    ArrowUp: { kc: 1025, cp: 0 },
+    ArrowDown: { kc: 1024, cp: 0 },
+    Home: { kc: 1028, cp: 0 },
+    End: { kc: 1029, cp: 0 },
+  };
+
+  // 書式・取り消し: Ctrl+文字 のキーを LibreOffice に送る（.uno: の命令を直接送る方法は効かなかった）
+  //   キーの番号 = Ctrl（0x2000 = 8192）+ 文字の番号（css::awt::Key。A = 512 から順。B = 513）
+  const CTRL = { b: 8705, i: 8712, u: 8724, z: 8729, y: 8728 };
+  async function ctrlKey(k) {
+    await post(`/key?type=0&cp=0&kc=${CTRL[k]}`);
+    await post(`/key?type=1&cp=0&kc=${CTRL[k]}`);
+    scheduleRender();
+  }
+  // 保存: 書き出した docx を取って、このパネルを開いたアプリの画面（親）に渡す。親が新しい Doc として開く
+  async function saveAs(mode) {
+    try {
+      const r = await fetch('/save', { method: 'POST' });
+      if (!r.ok) throw new Error('save ' + r.status);
+      const bytes = await (await fetch('/saved.docx')).arrayBuffer();
+      window.parent.postMessage({ type: 'lok-saved', mode, bytes }, '*', [bytes]);
+      log(mode === 'overwrite' ? '保存しました（この Doc に上書き）' : '保存しました（新しい Doc として開きます）');
+    } catch (e) {
+      log('保存できませんでした: ' + e.message);
+    }
+  }
+  document.getElementById('save-btn').addEventListener('click', () => saveAs('overwrite'));
+  document.getElementById('save-new-btn').addEventListener('click', () => saveAs('new'));
+
+  document.querySelectorAll('[data-ctrl]').forEach((b) => {
+    b.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても文字の入力先を失わない
+    b.addEventListener('click', () => ctrlKey(b.dataset.ctrl));
+  });
+
+  // キー入力（IME の変換中は除く）
+  ime.addEventListener('keydown', async (e) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.ctrlKey && !e.altKey && !e.metaKey && CTRL[e.key.toLowerCase()]) {
+      e.preventDefault();
+      return ctrlKey(e.key.toLowerCase());
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const sp = SPECIAL[e.key];
+    if (!sp && e.key.length !== 1) return;
+    e.preventDefault();
+    const cp = sp ? sp.cp.toString(16).toUpperCase() : e.key.codePointAt(0).toString(16).toUpperCase();
+    // Shift+矢印・Home・End は選択になる（LibreOffice では KEY_SHIFT = 4096 を足す）
+    const shift = e.shiftKey && /^(Arrow|Home|End)/.test(e.key) ? 4096 : 0;
+    const kc = sp ? sp.kc + shift : 0;
+    const ms = await post(`/key?type=0&cp=${cp}&kc=${kc}`);
+    await post(`/key?type=1&cp=${cp}&kc=${kc}`);
+    log(`キー ${e.key}（送信 ${ms.toFixed(1)} ms）`);
+    scheduleRender();
+  });
+
+  // 変換中（確定の前の文字）
+  ime.addEventListener('compositionupdate', async (e) => {
+    const ms = await post(`/ime?type=0&text=${hexList(e.data)}`);
+    log(`変換中 ${e.data}（送信 ${ms.toFixed(1)} ms）`);
+    scheduleRender();
+  });
+
+  // 確定。確定する文字を変換中として送ってから、確定を送る（LOKit の仕様に合わせる）
+  ime.addEventListener('compositionend', async (e) => {
+    const list = hexList(e.data);
+    await post(`/ime?type=0&text=${list}`);
+    await post(`/ime?type=2&text=${list}`);
+    ime.value = '';
+    log(`確定 ${e.data}`);
+    scheduleRender();
+  });
+
+  // keydown を通らずに届いた文字（貼りつけ・音声入力など）。変換中は除く
+  ime.addEventListener('input', async (e) => {
+    if (e.isComposing || !ime.value) return;
+    const text = ime.value;
+    ime.value = '';
+    for (const ch of text) {
+      const cp = ch.codePointAt(0).toString(16).toUpperCase();
+      await post(`/key?type=0&cp=${cp}`);
+      await post(`/key?type=1&cp=${cp}`);
+    }
+    log(`入力 ${text}`);
+    scheduleRender();
+  });
+
+  // マウスの位置（twips）。表示の位置（yPx）を足して、文書の位置にする
+  function toTwips(e) {
+    const rect = page.getBoundingClientRect();
+    return { x: Math.round((e.clientX - rect.left) * 15), y: Math.round((e.clientY - rect.top + yPx) * 15) };
+  }
+
+  // ドラッグで選択する。押した所で「押す」、動かすと「動かす」、離すと「離す」を LibreOffice に送る
+  let dragging = false;
+  let moveBusy = false;
+  page.addEventListener('mousedown', async (e) => {
+    e.preventDefault();
+    ime.focus({ preventScroll: true });
+    dragging = true;
+    const p = toTwips(e);
+    await post(`/mouse?type=0&x=${p.x}&y=${p.y}`);
+  });
+  window.addEventListener('mousemove', async (e) => {
+    if (!dragging || moveBusy) return; // 送りすぎないよう、前の分が終わってから次を送る
+    moveBusy = true;
+    const p = toTwips(e);
+    await post(`/mouse?type=2&x=${p.x}&y=${p.y}`);
+    moveBusy = false;
+  });
+  window.addEventListener('mouseup', async (e) => {
+    if (!dragging) return;
+    dragging = false;
+    const p = toTwips(e);
+    await post(`/mouse?type=1&x=${p.x}&y=${p.y}`);
+    log(`選択・カーソル（twips ${p.x}, ${p.y}）`);
+    scheduleRender(200);
+  });
+
+  // 文書の高さ（px）。表示の位置がこれを超えないようにする（超えると黒い画面になる）
+  let docPx = 0;
+  async function loadSize() {
+    try {
+      const s = await (await fetch('/size')).json();
+      docPx = Math.ceil(s.h / 15);
+    } catch (e) { log('文書の大きさを取れませんでした'); }
+  }
+
+  viewport.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const maxY = Math.max(0, docPx - H);
+    yPx = Math.min(maxY, Math.max(0, yPx + Math.sign(e.deltaY) * 120));
+    scheduleRender(0);
+  }, { passive: false });
+
+  ime.focus({ preventScroll: true });
+  loadSize().then(render);
+</script>
+</body>
+</html>

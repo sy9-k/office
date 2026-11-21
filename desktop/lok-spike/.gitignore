@@ -1,0 +1,14 @@
+# ビルドの出力と、実行で出る一時ファイル（コミットしない）
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.bmp
+*.png
+*.pdf
+*.txt
+*.docx
+.~lock.*
+profile/

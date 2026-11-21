@@ -793,11 +793,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(LokChild::default())
         .setup(|app| {
             open_files_or_hub(app.handle(), office_files(std::env::args().skip(1)), true);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            lok_preview,
+            lok_stop,
             new_window,
             app_ready,
             pick_open_files,
@@ -809,6 +812,7 @@ pub fn run() {
             external_login,
             external_login_cancel,
             open_external,
+            open_folder,
             google_token,
             google_has_refresh,
             google_signout,
@@ -827,6 +831,101 @@ pub fn run() {
             fs_read_path,
             fs_write_path,
         ])
-        .run(tauri::generate_context!())
-        .expect("SK Hub Office の起動に失敗しました");
+        .build(tauri::generate_context!())
+        .expect("SK Hub Office の起動に失敗しました")
+        .run(|app, event| {
+            // アプリを閉じるとき、LibreOffice の表示用のサーバーも止める
+            if let tauri::RunEvent::Exit = event {
+                lok_kill(&app.state::<LokChild>());
+            }
+        });
+}
+
+// ---------- LibreOffice で表示（試作）----------
+// 文書を一時ファイルの docx にして、lok_server.exe（LOKit を使う HTTP サーバー）に開かせる。
+// 画面は lok_server が返す web/index.html（描画と入力）。サーバーは 1 つだけ動かす
+#[derive(Default)]
+struct LokChild(std::sync::Mutex<Option<std::process::Child>>);
+
+fn lok_kill(state: &LokChild) {
+    if let Ok(mut g) = state.0.lock() {
+        if let Some(mut c) = g.take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+// LibreOffice の program フォルダ（環境変数 LOK_PROGRAM で変えられる）
+fn lok_program_dir() -> PathBuf {
+    std::env::var("LOK_PROGRAM")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(r"C:\Program Files\LibreOffice\program"))
+}
+
+// 試作のフォルダ（lok_server.exe と web/ がある。環境変数 LOK_SPIKE_DIR で変えられる。既定はこのリポジトリの desktop/lok-spike）
+fn lok_spike_dir() -> PathBuf {
+    std::env::var("LOK_SPIKE_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("lok-spike"))
+}
+
+#[tauri::command]
+async fn lok_preview(state: tauri::State<'_, LokChild>, bytes: Vec<u8>) -> Result<String, String> {
+    lok_kill(&state);
+    let spike = lok_spike_dir();
+    let server = spike.join("lok_server.exe");
+    if !server.exists() {
+        return Err(format!("lok_server.exe が見つかりません: {}", server.display()));
+    }
+    let program = lok_program_dir();
+    if !program.join("mergedlo.dll").exists() {
+        return Err(format!("LibreOffice が見つかりません: {}", program.display()));
+    }
+    // 前に残ったサーバー（アプリが強制終了されたときなど）を止める。残ると LibreOffice のプロファイルを握ったままになる
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "lok_server.exe"])
+            .creation_flags(0x0800_0000)
+            .output();
+    }
+    let work = std::env::temp_dir().join("sk-hub-office-lok");
+    std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+    // 空いているポートを選ぶ（127.0.0.1 だけで待ち受ける）。作業ファイルとプロファイルは回ごとに別の名前にする
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map_err(|e| e.to_string())?
+        .port();
+    let doc = work.join(format!("preview-{port}.docx"));
+    std::fs::write(&doc, &bytes).map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(&server);
+    cmd.arg(&doc)
+        .arg(&program)
+        .arg(work.join(format!("profile-{port}")))
+        .arg(spike.join("web"))
+        .arg(port.to_string());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW（黒い窓を出さない）
+    }
+    let child = cmd.spawn().map_err(|e| e.to_string())?;
+    *state.0.lock().map_err(|e| e.to_string())? = Some(child);
+    // 待ち受けるまで待つ（最大 30 秒）
+    let addr = format!("127.0.0.1:{port}");
+    for _ in 0..150 {
+        if std::net::TcpStream::connect(&addr).is_ok() {
+            return Ok(format!("http://{addr}/"));
+        }
+        tokio_sleep(std::time::Duration::from_millis(200)).await;
+    }
+    lok_kill(&state);
+    Err("LibreOffice の起動がタイムアウトしました".into())
+}
+
+#[tauri::command]
+fn lok_stop(state: tauri::State<'_, LokChild>) {
+    lok_kill(&state);
 }

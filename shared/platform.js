@@ -19,7 +19,8 @@
       silentPdf: desktop,     // 印刷のダイアログなしで PDF に書き出す（savePdf）
       externalLogin: desktop, // いつものブラウザでログインする（SK Hub Systems・Google。externalLogin）
       secureTokens: desktop,  // Google ドライブの長いログイン（リフレッシュトークン）を OS の保管庫に入れ、1 時間で切れない
-      offlineQueue: desktop   // オフラインで保存した Google ドライブのファイルを、このアプリを閉じても覚えておき、つながったら送る
+      offlineQueue: desktop,  // オフラインで保存した Google ドライブのファイルを、このアプリを閉じても覚えておき、つながったら送る
+      lokPreview: desktop     // LibreOffice の画面で文書を表示する（試作。lokPreview・lokStop）
     },
     // 起動で渡されたファイルのパス（ダブルクリックしたとき。Rust がウィンドウを開くときに入れる）
     openArgs: desktop && Array.isArray(window.__SK_OPEN__) ? window.__SK_OPEN__ : [],
@@ -38,6 +39,11 @@
     externalLogin: function (urlTemplate, timeoutSecs, inApp) { return Platform.invoke("external_login", { urlTemplate: urlTemplate, timeoutSecs: timeoutSecs || 600, inApp: !!inApp }); },
     cancelLogin: function () { return Platform.invoke("external_login_cancel"); },
     openExternal: function (url) { return Platform.invoke("open_external", { url: url }); },
+    // 保存先のフォルダを、エクスプローラーで開く（デスクトップ版）
+    openFolder: function (dir) { return Platform.invoke("open_folder", { dir: dir }); },
+    // LibreOffice で文書を描く試作（デスクトップ版）。bytes は docx の中身（バイトの配列）。表示するページの URL を返す
+    lokPreview: function (bytes) { return Platform.invoke("lok_preview", { bytes: bytes }); },
+    lokStop: function () { return Platform.invoke("lok_stop"); },
     // Google のトークン（リフレッシュトークンは Rust が OS の保管庫に入れ、ここには来ない）
     googleToken: function (params, useStoredRefresh) { return Platform.invoke("google_token", { params: params, useStoredRefresh: !!useStoredRefresh }); },
     googleHasRefresh: function () { return Platform.invoke("google_has_refresh"); },

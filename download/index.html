@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja" data-app="hub">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#35456b">
+<meta name="description" content="SK Hub Office のデスクトップ版（Windows）をダウンロードできます。Doc・Sheet・Slide を 1 つのインストーラーで入れられます。">
+<title>ダウンロード — SK Hub Office</title>
+<script src="https://sk-hub.jp/assets/fonts.js" data-fonts="https://fonts.googleapis.com/css2?family=M+PLUS+1:wght@400;500;700&display=swap" data-icons="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0..1,0&display=block"></script>
+<link rel="stylesheet" href="https://sk-hub.jp/toolbox/shared/m3.css">
+<link rel="stylesheet" href="../shared/office.css">
+<link rel="manifest" href="../manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="../icons/favicon-32.png">
+<style>
+  .dl { max-width: 880px; margin: 0 auto; padding: 48px 20px 64px; display: grid; gap: 32px; }
+  .dl__hero { display: grid; gap: 16px; justify-items: start; }
+  .dl__logo { width: 64px; height: 64px; border-radius: 18px; }
+  .dl__eyebrow { font-size: 12px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--md-on-surface-variant); margin: 0; }
+  .dl__title { font-size: 32px; line-height: 40px; font-weight: 700; margin: 0; color: var(--md-on-surface); }
+  .dl__lead { font-size: 16px; line-height: 26px; color: var(--md-on-surface-variant); margin: 0; }
+  .dl__card { display: grid; gap: 16px; padding: 24px; border-radius: 28px; background: var(--md-surface-container-low); }
+  .dl__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+  .dl__btn { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; }
+  .dl__meta { font-size: 13px; line-height: 20px; color: var(--md-on-surface-variant); margin: 0; }
+  .dl__apps { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; list-style: none; padding: 0; margin: 0; }
+  .dl__app { display: grid; gap: 6px; padding: 20px; border-radius: 24px; background: var(--md-surface-container); }
+  .dl__app strong { font-size: 16px; line-height: 24px; color: var(--md-on-surface); }
+  .dl__app span { font-size: 14px; line-height: 22px; color: var(--md-on-surface-variant); }
+  .dl__h2 { font-size: 20px; line-height: 28px; font-weight: 700; margin: 0; color: var(--md-on-surface); }
+  .dl__list { margin: 0; padding-left: 1.2em; display: grid; gap: 8px; font-size: 15px; line-height: 24px; color: var(--md-on-surface-variant); }
+  .dl__foot { display: flex; flex-wrap: wrap; gap: 12px 20px; font-size: 14px; }
+  .dl__foot a { color: var(--md-primary); }
+  @media (max-width: 600px) { .dl { padding: 32px 16px 48px; } .dl__title { font-size: 26px; line-height: 34px; } }
+</style>
+</head>
+<body>
+<main class="dl">
+  <section class="dl__hero">
+    <img class="dl__logo" src="../icons/icon-192.png" alt="" draggable="false">
+    <p class="dl__eyebrow">SK Hub Office</p>
+    <h1 class="dl__title">デスクトップ版をダウンロード</h1>
+    <p class="dl__lead">書く・計算する・発表する。Windows のパソコンに入れて、ふだんのアプリのように使えます。ファイルは、パソコンのフォルダに保存されます。</p>
+  </section>
+
+  <section class="dl__card" aria-labelledby="dl-win">
+    <h2 class="dl__h2" id="dl-win">Windows 版</h2>
+    <div class="dl__row">
+      <a class="m3-btn m3-btn--filled m3-state dl__btn" href="https://github.com/sy9-k/office/releases/download/v0.2.0/SK-Hub-Office-Setup-0.2.0.exe" download>
+        <span class="msr" aria-hidden="true">download</span>インストーラーをダウンロード
+      </a>
+      <p class="dl__meta">バージョン 0.2.0・Windows 10 / 11（64 ビット）</p>
+    </div>
+    <p class="dl__meta">ダウンロードしたファイルを開くと、インストールが始まります。Doc・Sheet・Slide から入れるアプリを選べます。</p>
+    <ul class="dl__list">
+      <li>インストール後は、自動で新しい版を確認します（「アカウント」→「更新を確認」からも確認できます）。</li>
+      <li>ブラウザ版と同じアカウント（SK Hub・Google）でログインできます。</li>
+    </ul>
+  </section>
+
+  <section aria-labelledby="dl-apps">
+    <h2 class="dl__h2" id="dl-apps">入るアプリ</h2>
+    <ul class="dl__apps" style="margin-top: 16px;">
+      <li class="dl__app"><strong>Doc</strong><span>文書を書く。</span></li>
+      <li class="dl__app"><strong>Sheet</strong><span>表で計算する。</span></li>
+      <li class="dl__app"><strong>Slide</strong><span>発表をつくる。</span></li>
+    </ul>
+  </section>
+
+  <section class="dl__card" aria-labelledby="dl-other">
+    <h2 class="dl__h2" id="dl-other">ブラウザで使う</h2>
+    <p class="dl__meta">インストールしなくても、ブラウザ（Chrome・Edge）でそのまま使えます。</p>
+    <div class="dl__row">
+      <a class="m3-btn m3-btn--tonal m3-state dl__btn" href="../">ブラウザ版を開く</a>
+    </div>
+  </section>
+
+  <footer class="dl__foot">
+    <a href="https://github.com/sy9-k/office/releases">すべての版（リリースノート）</a>
+    <a href="https://support.sk-hub.jp/">サポート</a>
+  </footer>
+</main>
+</body>
+</html>
